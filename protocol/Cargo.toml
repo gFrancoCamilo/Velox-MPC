@@ -3,6 +3,14 @@ name = "protocol"
 version = "0.1.0"
 authors = ["akhilsb <akhilsai2712@gmail.com>"]
 edition = "2021"
+build = "build.rs"
+
+[features]
+default = []
+# Opt-in CUDA GPU GEMM. Requires NVIDIA hardware, CUDA Toolkit ≥ 10.0, and nvcc on
+# $PATH at build time (set $CUDA_HOME if non-default). On non-CUDA hosts (e.g. macOS
+# Apple Silicon) leave the feature off — build.rs is a no-op without it.
+gpu = []
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

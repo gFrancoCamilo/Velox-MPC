@@ -313,7 +313,36 @@ pub fn matrix_vector_multiply(
 ///
 /// Layout is identical to `async_mpc/fields/src/poly.rs::matrix_matrix_multiply_cpu` so the
 /// two projects' benchmarks are directly comparable.
+///
+/// Dispatcher: with `--features gpu`, routes large enough inputs to the CUDA kernel
+/// (see `gpu_ffi::gpu_matrix_matrix_multiply`); otherwise (or for small inputs that
+/// would be dominated by PCIe upload overhead) calls `matrix_matrix_multiply_cpu`
+/// directly. The CPU path stays the canonical reference and is always callable.
 pub fn matrix_matrix_multiply(
+    matrix: &[Vec<LargeField>],
+    vectors: &[Vec<LargeField>],
+    row_major: bool,
+) -> Vec<Vec<LargeField>> {
+    #[cfg(feature = "gpu")]
+    {
+        // Mirrors async_mpc's small-input bailout. Below this work threshold the
+        // device upload cost dominates the actual arithmetic. Tune once the kernel
+        // exists.
+        const GPU_THRESHOLD: usize = 50_000;
+        let rows = matrix.len();
+        let cols = matrix.first().map(|r| r.len()).unwrap_or(0);
+        let work = rows.saturating_mul(cols).saturating_mul(vectors.len());
+        if work >= GPU_THRESHOLD {
+            return crate::gpu_ffi::gpu_matrix_matrix_multiply(matrix, vectors, row_major);
+        }
+    }
+    matrix_matrix_multiply_cpu(matrix, vectors, row_major)
+}
+
+/// CPU implementation — Rayon-parallel over rows. Always available regardless of
+/// the `gpu` feature; callers needing to force CPU (e.g. the bench's reference
+/// path) should call this directly.
+pub fn matrix_matrix_multiply_cpu(
     matrix: &[Vec<LargeField>],
     vectors: &[Vec<LargeField>],
     row_major: bool,
@@ -326,7 +355,7 @@ pub fn matrix_matrix_multiply(
     let cols = matrix[0].len();
     if vectors.iter().any(|v| v.len() != cols) {
         log::error!(
-            "matrix_matrix_multiply: matrix column count ({}) does not match vector lengths {:?}",
+            "matrix_matrix_multiply_cpu: matrix column count ({}) does not match vector lengths {:?}",
             cols,
             vectors.iter().map(|v| v.len()).collect::<Vec<_>>()
         );
