@@ -2,8 +2,9 @@ use std::{ops::{Mul, Add, Sub}};
 
 use crate::Context;
 use crypto::{hash::{do_hash, Hash}, aes_hash::MerkleTree};
-use lambdaworks_math::{unsigned_integer::element::UnsignedInteger, polynomial::Polynomial, traits::ByteConversion};
-use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf};
+use lambdaworks_math::{unsigned_integer::element::UnsignedInteger, polynomial::Polynomial};
+use protocol::ByteConversion;
+use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element};
 use rand::random;
 use types::Replica;
 
@@ -50,14 +51,12 @@ impl Context{
 
             _indices = Vec::new();
             for party in 0..self.num_nodes{
-                _indices.push(LargeField::new(UnsignedInteger::from((party+1) as u64)));
+                _indices.push(LargeField::from((party+1) as u64));
             }
 
             // Generate nonce evaluations
             let evaluations_nonce_prf = sample_polynomials_from_prf(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })], 
+                vec![rand_field_element()], 
                 self.sec_key_map.clone(), 
                 self.num_faults, 
                 true, 
@@ -73,9 +72,7 @@ impl Context{
             // Generate the DZK proofs and commitments and utilize RBC to broadcast these proofs
             // Sample blinding polynomial
             let blinding_prf = sample_polynomials_from_prf(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })], 
+                vec![rand_field_element()], 
                 self.sec_key_map.clone(), 
                 self.num_faults, 
                 true, 
@@ -91,9 +88,7 @@ impl Context{
             blinding_poly_coefficients = blinding_poly_coefficients_vec[0].clone();
 
             let blinding_nonce_prf = sample_polynomials_from_prf(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })], 
+                vec![rand_field_element()], 
                 self.sec_key_map.clone(), 
                 self.num_faults, 
                 true, 
@@ -122,26 +117,20 @@ impl Context{
             
             // Generate nonce evaluations
             let (nonce_evaluations_ret,_nonce_coefficients) = generate_evaluation_points_fft(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })],
+                vec![rand_field_element()],
                 self.num_faults-1,
                 self.num_nodes,
             ).await;
             nonce_evaluations = nonce_evaluations_ret[0].clone();
 
-            let (blinding_poly_evaluations_vec, blinding_poly_coefficients_vec) = generate_evaluation_points_fft(vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })], 
+            let (blinding_poly_evaluations_vec, blinding_poly_coefficients_vec) = generate_evaluation_points_fft(vec![rand_field_element()], 
                 self.num_faults-1, 
                 self.num_nodes
             ).await;
             blinding_poly_evaluations = blinding_poly_evaluations_vec[0].clone();
             blinding_poly_coefficients = blinding_poly_coefficients_vec[0].clone();
 
-            let (nonce_blinding_evaluations_vec, _nonce_coefficients_vec) = generate_evaluation_points_fft(vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })]
+            let (nonce_blinding_evaluations_vec, _nonce_coefficients_vec) = generate_evaluation_points_fft(vec![rand_field_element()]
                 , 
                 self.num_faults-1, 
                 self.num_nodes
@@ -322,7 +311,7 @@ impl Context{
         // Change this to be root of unity
         let dzk_point;
         if !self.use_fft{
-            dzk_point = dzk_poly.evaluate(&LargeField::new(UnsignedInteger::from((share_sender+1) as u64)));
+            dzk_point = dzk_poly.evaluate(&LargeField::from((share_sender+1) as u64));
         }
         else{
             // get point of evaluation

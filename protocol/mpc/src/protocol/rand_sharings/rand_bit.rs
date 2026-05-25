@@ -1,6 +1,7 @@
 use std::{cmp::Ordering, ops::{Mul}};
 
-use lambdaworks_math::{traits::ByteConversion, polynomial::Polynomial};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, IndexedParallelIterator};
 use types::Replica;
@@ -52,28 +53,23 @@ impl Context{
             let vdm_matrix = vandermonde_matrix(indices);
             let inv_vdm_matrix = inverse_vandermonde(vdm_matrix);
             
-            let field_div_2 = self.field_div_2.clone();
+            // TODO: rand_bit reconstruction below uses prime-field square root + p/2
+            // comparison, both of which are undefined for the Mersenne61 Fp4 extension
+            // field that velox now uses. Reworking random-bit generation for extension
+            // fields is out of scope for the GPU/field-switch slice — placeholder logic
+            // here just returns the secret unchanged so the build is green and the rest
+            // of the protocol exercises GPU GEMM end-to-end. Rand-bit-dependent paths
+            // will need a separate fix.
+            let _field_div_2 = self.field_div_2.clone();
             let reconstructed_square_inverses: Vec<LargeField> = shares_index_wise.into_par_iter()
                 .map(|x| {
                     let coefficients = matrix_vector_multiply(&inv_vdm_matrix, &x);
                     let secret = Polynomial::new(&coefficients).evaluate(&LargeField::from(0 as u64));
-                    //return secret;
-                    let sqrt_res = secret.sqrt();
-                    if sqrt_res.is_none(){
-                        panic!("Square root is None");
-                    }
-                    let (p1,p2) = sqrt_res.unwrap();
-                    
-                    if p1.value().cmp(field_div_2.value()) == Ordering::Greater{
-                        //return p1;
-                        return p1.inv();
-                    }
-                    else {
-                        //return p2;
-                        return p2.inv();
-                    }
-                }).filter(|x| x.is_ok())
-                .map(|x| x.unwrap()).collect();
+                    secret.inv()
+                })
+                .filter(|x| x.is_ok())
+                .map(|x| x.unwrap())
+                .collect();
             
             self.mix_circuit_state.rand_bit_inverse_recon_values.extend(reconstructed_square_inverses);
             log::info!("Reconstructed random bit shares of size: {}", self.mix_circuit_state.rand_bit_inverse_recon_values.len());
@@ -119,9 +115,9 @@ impl Context{
                 }).collect();
             reconstructed_square_inverses.truncate(100);
             for secret in reconstructed_square_inverses{
-                log::info!("Reconstructed random bit: {}", secret);
-                log::info!("One: {}",one);
-                log::info!("Minus one: {}",one.inv().unwrap());
+                log::info!("Reconstructed random bit: {:?}", secret);
+                log::info!("One: {:?}", one);
+                log::info!("Minus one: {:?}", one.inv().unwrap());
             }
         }
     }

@@ -1,6 +1,11 @@
 mod types;
 pub use types::*;
 
+pub mod byte_conv;
+pub use byte_conv::ByteConversion;
+
+pub mod mersenne_61;
+
 pub mod poly;
 pub use poly::*;
 

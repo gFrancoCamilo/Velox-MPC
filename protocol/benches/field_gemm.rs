@@ -1,4 +1,4 @@
-//! Benchmarks for Velox-MPC's CPU GEMM over BN254, plus protocol-shaped comparisons.
+//! Benchmarks for Velox-MPC's GEMM over Mersenne61 Fp4, plus protocol-shaped comparisons.
 //!
 //! Each `bench_*_compare` group also performs a correctness check: the scalar
 //! reference (the existing per-element loop) and the new `matrix_matrix_multiply`
@@ -38,7 +38,7 @@ fn rand_points(n: usize) -> Vec<LargeField> {
 // ---------------------------------------------------------------------------
 
 fn bench_raw_gemm(c: &mut Criterion) {
-    let mut group = c.benchmark_group("FieldGEMM/CPU/BN254");
+    let mut group = c.benchmark_group("FieldGEMM/CPU/M61_Fp4");
     let (rows, cols, batch) = (64usize, 128usize, 1024usize);
 
     let matrix = rand_matrix(rows, cols);
@@ -339,12 +339,49 @@ fn bench_batched_lagrange(c: &mut Criterion) {
     group.finish();
 }
 
+// ---------------------------------------------------------------------------
+// Bench 6 (GPU only): raw GEMM at async_mpc's reference shape, M61_Fp4 on the
+// CUDA path. Same `(rows, cols, batch) = (64, 128, 1024)` as the CPU bench, so
+// numbers line up 1:1 against async_mpc's M61_Fp4 bench group.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "gpu")]
+fn bench_raw_gemm_gpu(c: &mut Criterion) {
+    use protocol::gpu_ffi::gpu_matrix_matrix_multiply;
+
+    let mut group = c.benchmark_group("FieldGEMM/GPU/M61_Fp4");
+    let (rows, cols, batch) = (64usize, 128usize, 1024usize);
+
+    let matrix = rand_matrix(rows, cols);
+    let vectors = rand_matrix(batch, cols);
+
+    // Correctness gate: GPU output must byte-equal the CPU reference.
+    let cpu = matrix_matrix_multiply(&matrix, &vectors, false);
+    let gpu = gpu_matrix_matrix_multiply(&matrix, &vectors, false);
+    assert_eq!(cpu, gpu, "gpu_matrix_matrix_multiply mismatch at bench shape");
+
+    group.bench_with_input(
+        BenchmarkId::new("gpu_matrix_matrix_multiply", format!("{rows}x{cols}_b{batch}")),
+        &(&matrix, &vectors),
+        |b, (m, v)| b.iter(|| gpu_matrix_matrix_multiply(black_box(m), black_box(v), false)),
+    );
+
+    group.finish();
+}
+
+#[cfg(not(feature = "gpu"))]
+fn bench_raw_gemm_gpu(_c: &mut Criterion) {
+    // No-op when the GPU feature is off so the criterion_group! list below
+    // stays static and the rest of the benches still run on CPU-only hosts.
+}
+
 criterion_group!(
     benches,
     bench_raw_gemm,
     bench_batched_poly_eval,
     bench_batched_recon,
     bench_batched_party_eval,
-    bench_batched_lagrange
+    bench_batched_lagrange,
+    bench_raw_gemm_gpu
 );
 criterion_main!(benches);

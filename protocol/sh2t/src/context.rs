@@ -9,7 +9,7 @@ use anyhow::{anyhow, Result};
 use config::Node;
 
 use fnv::FnvHashMap;
-use lambdaworks_math::{traits::ByteConversion};
+use protocol::ByteConversion;
 use network::{
     plaintcp::{CancelHandler},
     Acknowledgement,

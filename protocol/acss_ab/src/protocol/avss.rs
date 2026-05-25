@@ -1,5 +1,5 @@
 use crypto::{hash::do_hash};
-use lambdaworks_math::{traits::ByteConversion,};
+use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField, AvssShare};
 use types::Replica;
 

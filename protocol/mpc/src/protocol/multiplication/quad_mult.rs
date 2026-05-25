@@ -1,5 +1,6 @@
 use crypto::hash::do_hash;
-use lambdaworks_math::{traits::ByteConversion, polynomial::Polynomial};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply};
 use rayon::prelude::{IntoParallelIterator, IndexedParallelIterator, ParallelIterator, IntoParallelRefIterator};
 use types::Replica;

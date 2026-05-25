@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use lambdaworks_math::traits::ByteConversion;
+use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField};
 use types::Replica;
 

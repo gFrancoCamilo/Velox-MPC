@@ -1,42 +1,26 @@
-use lambdaworks_math::{field::{fields::{montgomery_backed_prime_fields::MontgomeryBackendPrimeField}, element::FieldElement}};
-use lambdaworks_math::field::fields::fft_friendly::stark_252_prime_field::{MontgomeryConfigStark252PrimeField};
+use lambdaworks_math::field::element::FieldElement;
 
-// pub type LargeField = FieldElement<MontgomeryBackendPrimeField<MontgomeryConfigStark252PrimeField, 4>>;
-// pub type FieldType = MontgomeryBackendPrimeField<MontgomeryConfigStark252PrimeField, 4>;
-// pub type LargeFieldSer = [u8;32];
+use crate::mersenne_61::Mersenne61Degree4ExtensionField;
 
-// pub const FIELD_DIV_2: &str = "400000000000008800000000000000000000000000000000000000000000000";
-// use lambdaworks_math::{fft::cpu::roots_of_unity::get_powers_of_primitive_root, field::traits::RootsConfig};
-// pub fn gen_roots_of_unity(n: usize) -> Vec<LargeField> {
-//     let len = n.next_power_of_two();
-//     let order = len.trailing_zeros();
-//     get_powers_of_primitive_root(order.into(), len, RootsConfig::Natural).unwrap()
-// }
+/// Protocol field. 32-byte degree-4 extension of the Mersenne-61 prime field —
+/// 4 × u64 little-endian limbs, ~244-bit soundness, byte width matches the prior
+/// BN254 element so wire / serialization sizes stay the same.
+pub type LargeField = FieldElement<Mersenne61Degree4ExtensionField>;
 
-use lambdaworks_math::elliptic_curve::short_weierstrass::curves::bn_254::field_extension::BN254PrimeField;
-pub type LargeField = FieldElement<BN254PrimeField>;
-pub type FieldType = MontgomeryBackendPrimeField<BN254PrimeField, 4>;
+/// Serialized form of a `LargeField`. Always 32 bytes for Fp4_61.
 pub type LargeFieldSer = Vec<u8>;
 
-pub const FIELD_DIV_2: &str = "183227397098D014DC2822DB40C0AC2ECBC0B548B438E5469E10460B6C3E7EA3";
-// temporary fix
-
+/// Roots-of-unity stub used by share-point selection. Mersenne61 has no FFT
+/// support in lambdaworks (no MontgomeryBackend) — this just hands back the
+/// non-FFT party-id-as-field-element points, mirroring the previous behaviour
+/// in the `!use_fft` branch.
 pub fn gen_roots_of_unity(n: usize) -> Vec<LargeField> {
-    (1..n+1).into_iter().map(|x| LargeField::from(x as u64)).collect()
+    (1..n + 1)
+        .into_iter()
+        .map(|x| LargeField::from(x as u64))
+        .collect()
 }
 
-// use lambdaworks_math::elliptic_curve::short_weierstrass::curves::bn_254::field_extension::BN254PrimeField;
-// pub type LargeFieldBN = FieldElement<BN254PrimeField>;
-// pub type FieldType = MontgomeryBackendPrimeField<BN254PrimeField, 4>;
-// pub type LargeFieldSer = Vec<u8>;
-// temporary fix
-
-// pub fn gen_roots_of_unity(n: usize) -> Vec<LargeField> {
-//     (1..n+1).into_iter().map(|x| LargeField::from(x as u64)).collect()
-// }
-
-pub type FieldTypeFFT = MontgomeryBackendPrimeField<MontgomeryConfigStark252PrimeField, 4>;
-
-
-// Shares, nonce polynomial, blinding_nonce polynomial
-pub type AvssShare =  (Vec<LargeFieldSer>, LargeFieldSer, LargeFieldSer);
+/// Per-share triple emitted by the AVSS layer. Kept exactly as before — only the
+/// element width inside `LargeFieldSer` has changed (32 bytes, same as BN254).
+pub type AvssShare = (Vec<LargeFieldSer>, LargeFieldSer, LargeFieldSer);

@@ -45,9 +45,9 @@ pub async fn generate_evaluation_points(
 
     // The first evaluation is always at 0
     let mut evaluation_points = Vec::new();
-    evaluation_points.push(LargeField::new(UnsignedInteger::from(0u64)));
+    evaluation_points.push(LargeField::from(0u64));
     for i in 0..degree{
-        evaluation_points.push(LargeField::new(UnsignedInteger::from((i+1) as u64)));
+        evaluation_points.push(LargeField::from((i + 1) as u64));
     }
     
     // Generate coefficients of polynomial and then evaluate the polynomial at n points
@@ -59,7 +59,7 @@ pub async fn generate_evaluation_points(
     let evaluations_full = coefficients.par_iter().map(|polynomial|{
         let mut eval_vec_ind = Vec::new();
         for index in 0..shares_total{
-            eval_vec_ind.push(polynomial.evaluate(&LargeField::new(UnsignedInteger::from((index+1) as u64))));
+            eval_vec_ind.push(polynomial.evaluate(&LargeField::from((index + 1) as u64)));
         }
         return eval_vec_ind;
     }).collect();
@@ -76,9 +76,9 @@ pub async fn generate_evaluation_points_opt(
 
     // The first evaluation is always at 0
     let mut evaluation_points = Vec::new();
-    evaluation_points.push(LargeField::new(UnsignedInteger::from(0u64)));
+    evaluation_points.push(LargeField::from(0u64));
     for i in 0..degree{
-        evaluation_points.push(LargeField::new(UnsignedInteger::from((i+1) as u64)));
+        evaluation_points.push(LargeField::from((i + 1) as u64));
     }
 
     // Generate vandermonde matrix
@@ -94,7 +94,7 @@ pub async fn generate_evaluation_points_opt(
     let coeffs_mat = matrix_matrix_multiply(&inverse_vandermonde_mat, &evaluations_prf, false);
 
     let share_points: Vec<LargeField> = (1..=shares_total)
-        .map(|i| LargeField::new(UnsignedInteger::from(i as u64)))
+        .map(|i| LargeField::from(i as u64))
         .collect();
     let share_powers = powers_matrix(&share_points, degree + 1);
     let evaluations_full = matrix_matrix_multiply(&share_powers, &coeffs_mat, false);
@@ -153,25 +153,49 @@ pub async fn generate_evaluation_points_fft(
 //     (evaluations, coefficients)
 // }
 
-pub fn pseudorandom_lf(rng_seed: &[u8], num: usize)->Vec<LargeField>{
+pub fn pseudorandom_lf(rng_seed: &[u8], num: usize) -> Vec<LargeField> {
     let mut rng = ChaCha20Rng::from_seed(do_hash(rng_seed));
-    let mut random_numbers: Vec<LargeField> = Vec::new();
-    for _i in 0..num{
-        let mut limbs = [0u64;4];
-        for j in 0..4{
-            limbs[j] = rng.next_u64();
-        }
-        let bigint_rand = UnsignedInteger{ 
-            limbs: limbs
-        };
-        random_numbers.push(LargeField::new( bigint_rand));
+    let mut random_numbers: Vec<LargeField> = Vec::with_capacity(num);
+    for _ in 0..num {
+        // Fp4_61 element = 4 base-field (Mersenne-61) elements packed as two Fp2 components.
+        // Each base element accepts a u64; values ≥ p are folded via `from_u64`.
+        let c0 = lambdaworks_math::field::element::FieldElement::<
+            crate::mersenne_61::Mersenne61Field,
+        >::from(rng.next_u64());
+        let c1 = lambdaworks_math::field::element::FieldElement::<
+            crate::mersenne_61::Mersenne61Field,
+        >::from(rng.next_u64());
+        let c2 = lambdaworks_math::field::element::FieldElement::<
+            crate::mersenne_61::Mersenne61Field,
+        >::from(rng.next_u64());
+        let c3 = lambdaworks_math::field::element::FieldElement::<
+            crate::mersenne_61::Mersenne61Field,
+        >::from(rng.next_u64());
+        let lo = crate::mersenne_61::Fp2E::new([c0, c1]);
+        let hi = crate::mersenne_61::Fp2E::new([c2, c3]);
+        random_numbers.push(LargeField::new([lo, hi]));
     }
     random_numbers
 }
 
 pub fn rand_field_element() -> LargeField {
-    let rand_big = UnsignedInteger { limbs: random() };
-    LargeField::new(rand_big)
+    // Sample 4 independent u64 limbs and fold each into the Mersenne-61 base field.
+    let r: [u64; 4] = random();
+    let c0 = lambdaworks_math::field::element::FieldElement::<
+        crate::mersenne_61::Mersenne61Field,
+    >::from(r[0]);
+    let c1 = lambdaworks_math::field::element::FieldElement::<
+        crate::mersenne_61::Mersenne61Field,
+    >::from(r[1]);
+    let c2 = lambdaworks_math::field::element::FieldElement::<
+        crate::mersenne_61::Mersenne61Field,
+    >::from(r[2]);
+    let c3 = lambdaworks_math::field::element::FieldElement::<
+        crate::mersenne_61::Mersenne61Field,
+    >::from(r[3]);
+    let lo = crate::mersenne_61::Fp2E::new([c0, c1]);
+    let hi = crate::mersenne_61::Fp2E::new([c2, c3]);
+    LargeField::new([lo, hi])
 }
 
 

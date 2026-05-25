@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crypto::hash::do_hash;
-use lambdaworks_math::traits::ByteConversion;
+use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField, check_if_all_points_lie_on_degree_x_polynomial};
 use types::Replica;
 

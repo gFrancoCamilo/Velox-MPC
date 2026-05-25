@@ -4,7 +4,7 @@
 //! including macOS — build the crate cleanly.
 //!
 //! With the feature on, this compiles every `.cu` file under `protocol/cuda/`
-//! into a static archive (`libbn254_gemm_cuda.a`) and links it plus the CUDA
+//! into a static archive (`libfield_gemm_cuda.a`) and links it plus the CUDA
 //! runtime (`cudart`) into the crate. Mirrors `async_mpc/fields/build.rs`.
 
 use std::env;
@@ -77,7 +77,7 @@ fn main() {
         );
     }
 
-    let lib_path = out_dir.join("libbn254_gemm_cuda.a");
+    let lib_path = out_dir.join("libfield_gemm_cuda.a");
     let _ = std::fs::remove_file(&lib_path);
     let mut ar = Command::new("ar");
     ar.arg("rcs").arg(&lib_path);
@@ -90,7 +90,7 @@ fn main() {
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-lib=static=bn254_gemm_cuda");
+    println!("cargo:rustc-link-lib=static=field_gemm_cuda");
     println!(
         "cargo:rustc-link-search=native={}",
         cuda_home.join("lib64").display()

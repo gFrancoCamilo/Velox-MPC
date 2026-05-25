@@ -1,5 +1,6 @@
 use crypto::aes_hash::MerkleTree;
-use lambdaworks_math::{traits::ByteConversion, polynomial::Polynomial};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::LargeField;
 
 use crate::{Context, protocol::ACSSABState};

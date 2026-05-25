@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::{Add, Mul}};
 
-use lambdaworks_math::{traits::ByteConversion};
+use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, rand_field_element};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use types::{Replica, ProtSyncMsg, SyncMsg, SyncState};

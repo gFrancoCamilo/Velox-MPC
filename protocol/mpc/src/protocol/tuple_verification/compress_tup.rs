@@ -1,4 +1,5 @@
-use lambdaworks_math::{polynomial::Polynomial, traits::ByteConversion};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, IntoParallelRefIterator};
 
@@ -277,7 +278,7 @@ impl Context{
             log::info!("Last level of compression at depth {} with size of vectors {}, proceeding to reconstruct sharings",depth,x_points.len());
         }
         ex_compr_state.ex_compr_terminated = true;
-        log::info!("Terminated compression at depth {} with size of xvector {}, yvector {} hpoint {}, proceeding to next depth",depth,x_points.len(),y_points.len(),h_point);
+        log::info!("Terminated compression at depth {} with size of xvector {}, yvector {} hpoint {:?}, proceeding to next depth",depth,x_points.len(),y_points.len(),h_point);
         if x_points.len() == 1{
             log::info!("Last level of compression, reconstructing secrets");
             let prot_msg = ProtMsg::ReconstructVerfOutputSharing(x_points[0].to_bytes_be(), y_points[0].to_bytes_be(), h_point.to_bytes_be());
@@ -347,7 +348,7 @@ impl Context{
                 self.reconstruct_output().await;
             }
             else{
-                log::error!("handle_reconstruct_verf_output_sharing: Multiplication constraint does not hold, with {} {}", a_sec* b_sec, c_sec);
+                log::error!("handle_reconstruct_verf_output_sharing: Multiplication constraint does not hold, with {:?} {:?}", a_sec* b_sec, c_sec);
                 return;
             }
         }

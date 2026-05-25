@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::anyhow;
-use protocol::LargeField;
+use protocol::{ByteConversion, LargeField};
 
 /// Reads first k lines from the primary file, or fallback file if primary doesn't exist
 /// Validates that each line can be represented as a 250-bit binary string
@@ -61,17 +61,17 @@ pub fn read_input_from_files(
     Ok(converted_fes)
 }
 
-/// Alternative validation using LargeField if you want to use your existing field arithmetic
+/// Convert a free-form text line into a `LargeField` (Fp4_61) element by treating its
+/// bytes as a big-endian 32-byte buffer (zero-padded on the left when shorter, rejected
+/// when longer). The previous BN254-based code did this implicitly via `from_hex`; we
+/// keep the same behaviour for input compatibility.
 fn convert_string_to_large_field(input: &str) -> Option<LargeField> {
-    let string_to_hex_string = |s: &str| -> String {
-        let mut hex_string = String::new();
-        for byte in s.as_bytes() {
-            hex_string.push_str(&format!("{:02x}", byte));
-        }
-        hex_string
-    };
-    if let Ok(largefield_ele) = LargeField::from_hex(string_to_hex_string(input).as_str()){
-        return Some(largefield_ele);
+    let mut bytes = input.as_bytes().to_vec();
+    if bytes.len() > 32 {
+        return None;
     }
-    None
+    let mut padded = [0u8; 32];
+    padded[32 - bytes.len()..].copy_from_slice(&bytes);
+    bytes.clear();
+    LargeField::from_bytes_be(&padded).ok()
 }

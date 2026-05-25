@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque, HashSet};
 
-use lambdaworks_math::{traits::ByteConversion, polynomial::Polynomial};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::{AvssShare, LargeField, LargeFieldSer};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use types::Replica;

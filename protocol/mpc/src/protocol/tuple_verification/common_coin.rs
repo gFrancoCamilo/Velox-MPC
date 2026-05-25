@@ -1,4 +1,5 @@
-use lambdaworks_math::{polynomial::Polynomial, traits::ByteConversion};
+use lambdaworks_math::{polynomial::Polynomial};
+use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField};
 
 use crate::{Context, msg::ProtMsg, protocol::tuple_verification::ex_compr_state::ExComprState};

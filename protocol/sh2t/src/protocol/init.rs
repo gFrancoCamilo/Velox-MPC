@@ -1,7 +1,8 @@
 use crate::Context;
 use crypto::{hash::{do_hash, Hash}};
-use lambdaworks_math::{unsigned_integer::element::UnsignedInteger, traits::ByteConversion};
-use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf};
+use lambdaworks_math::{unsigned_integer::element::UnsignedInteger};
+use protocol::ByteConversion;
+use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element};
 use rand::random;
 use types::Replica;
 
@@ -42,14 +43,12 @@ impl Context{
             coefficients.extend(coefficients_batch);
             _indices = Vec::new();
             for party in 0..self.num_nodes{
-                _indices.push(LargeField::new(UnsignedInteger::from((party+1) as u64)));
+                _indices.push(LargeField::from((party+1) as u64));
             }
 
             // Generate nonce evaluations
             let evaluations_nonce_prf = sample_polynomials_from_prf(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })], 
+                vec![rand_field_element()], 
                 self.sec_key_map.clone(), 
                 2*self.num_faults, 
                 true, 
@@ -78,9 +77,7 @@ impl Context{
             
             // Generate nonce evaluations
             let (nonce_evaluations_ret,_nonce_coefficients) = generate_evaluation_points_fft(
-                vec![LargeField::new(UnsignedInteger{
-                    limbs: random()
-                })],
+                vec![rand_field_element()],
                 2*self.num_faults-1,
                 self.num_nodes,
             ).await;

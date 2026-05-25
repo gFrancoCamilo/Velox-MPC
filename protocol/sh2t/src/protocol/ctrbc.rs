@@ -1,4 +1,4 @@
-use lambdaworks_math::traits::ByteConversion;
+use protocol::ByteConversion;
 use protocol::{interpolate_shares};
 
 use crate::Context;
