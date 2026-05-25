@@ -5,7 +5,7 @@ use crate::Context;
 use bincode::{Result};
 use crypto::hash::do_hash;
 use lambdaworks_math::{traits::ByteConversion, polynomial::Polynomial};
-use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply};
+use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply, matrix_matrix_multiply, powers_matrix};
 use rayon::prelude::{ ParallelIterator, IntoParallelRefIterator};
 use types::{Replica, WrapperMsg};
 
@@ -105,43 +105,42 @@ impl Context{
 
         let vandermonde_points: Vec<LargeField> = (2..self.num_nodes+2).into_iter().map(|x| LargeField::from(x as u64)).collect();
         let vdm_matrix = Self::vandermonde_matrix(vandermonde_points, self.num_faults); // TODO: can initialize the vdm_matrix somewhere outside to not compute it each time this gets called
-                
-        let mut shares_party: HashMap<usize, Vec<LargeField>> = HashMap::default();
-        for party in 0..self.num_nodes{
-            shares_party.insert(party, Vec::with_capacity(tot_shares));
-        }
-        // Compute all the shares and store them in share_for_party[group][party]
-        // Maybe this can be parallelized? 
-        for i in 0..total_chunks {
-            let o_vec = Self::matrix_vector_multiply(&vdm_matrix, &o_shares_grouped[i]);
-            let mut z_vector = Vec::new();
-            //zs[i] = Vec::with_capacity(2 * self.num_faults + 1);
 
+        // Build every chunk's z_vector and o_vec first, then do ONE GEMM across all
+        // chunks to evaluate them at the n party points. Per-chunk GEMM lost ~6× to
+        // the scalar loop because each call paid Rayon setup overhead for a tiny
+        // 16×11 product; bench `BatchedPartyEval` characterizes the right shape.
+        let z_vector_len = 2 * self.num_faults + 1;
+        let party_powers = powers_matrix(&self.roots_of_unity, z_vector_len);
+
+        let mut z_vectors: Vec<Vec<LargeField>> = Vec::with_capacity(total_chunks);
+        let mut o_vecs: Vec<Vec<LargeField>> = Vec::with_capacity(total_chunks);
+        for i in 0..total_chunks {
+            o_vecs.push(Self::matrix_vector_multiply(&vdm_matrix, &o_shares_grouped[i]));
+            let mut z_vector = Vec::with_capacity(z_vector_len);
             for k in 0..=(2 * self.num_faults) {
                 let a: &Vec<LargeField> = &a_vec_shares_grouped[i][k];
                 let b: &Vec<LargeField> = &b_vec_shares_grouped[i][k];
                 z_vector.push(Self::dot_product(a, b).add(r_shares_grouped[i][k].clone()));
             }
-            // Use FFTs here if possible
-            let polynomial = Polynomial::new(&z_vector); // Create polynomial from the computed zs
-            // Create evaluations at roots of unity?
-            // The first level evaluation should still be conducted over normal field elements, the second level evaluation can be conducted over roots of unity
-            //let evaluations_res= Polynomial::evaluate_fft::<FieldType>(&polynomial, 1, Some(self.num_nodes));
-            let evaluations_res: Result<Vec<LargeField>> = Ok(self.roots_of_unity.clone().into_iter().map(|el| polynomial.evaluate(&el)).collect());
-            if evaluations_res.is_err(){
-                log::error!("Error evaluating polynomial at roots of unity: {:?}, switching to default evaluation", evaluations_res.err());
-                for p in 0..self.num_nodes {
-                    let evaluation_point = Self::get_share_evaluation_point(p, self.use_fft, self.roots_of_unity.clone());
-                    let share = Self::evaluate_polynomial_from_coefficients_at_position(z_vector.clone(), evaluation_point) + o_vec[p].clone();
-                    
-                    shares_party.get_mut(&p).unwrap().push(share);
-                }
-            }
-            else{
-                let evaluations: Vec<LargeField> = evaluations_res.unwrap();
-                for (index,share) in (0..self.num_nodes).into_iter().zip(evaluations.into_iter()){
-                    shares_party.get_mut(&index).unwrap().push(share + o_vec[index].clone());
-                }
+            z_vectors.push(z_vector);
+        }
+
+        // One GEMM: party_powers (n × (2t+1)) · z_vectors (chunks vectors of length (2t+1))
+        // → evals (n × chunks). evals[p][chunk] is the share for party `p` in chunk `chunk`,
+        // pre-`o_vec` add. Replaces the previous per-chunk `Polynomial::new(&z).evaluate(&el)`
+        // loop; `Polynomial::new`'s trailing-zero trim is a no-op for correctness here since
+        // zero coefficients contribute zero to the GEMM dot product.
+        let evals = matrix_matrix_multiply(&party_powers, &z_vectors, true);
+
+        let mut shares_party: HashMap<usize, Vec<LargeField>> = HashMap::default();
+        for party in 0..self.num_nodes {
+            shares_party.insert(party, Vec::with_capacity(tot_shares));
+        }
+        for i in 0..total_chunks {
+            for p in 0..self.num_nodes {
+                let share = evals[p][i].clone() + o_vecs[i][p].clone();
+                shares_party.get_mut(&p).unwrap().push(share);
             }
         }
 

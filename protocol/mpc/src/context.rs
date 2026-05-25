@@ -360,21 +360,32 @@ impl Context {
             log::error!("Error spawning CTRBC because of {:?}", ctrbc_status.err().unwrap());
         }
 
+        // port_sep is the per-ACS sub-service port multiplier: rbc=port_sep,
+        // ra=2*port_sep, asks=3*port_sep, added to each replica's base port on top
+        // of port_acs / port_acs_2. The two values below place the sub-service
+        // triples at base+{1350,1500,1650} for acs and base+{2200,2450,2700} for
+        // acs_2 — clear of the fixed offsets {0,600,1200,1800,1950} already in use
+        // and clear of each other.
+        let port_sep_acs: u16 = 150;
+        let port_sep_acs_2: u16 = 250;
+
         let status_acs = acs::Context::spawn(
             acs_config,
             acs_inp_recv,
             acs_out_send,
+            port_sep_acs,
             false,
         );
-        
+
         if status_acs.is_err() {
             log::error!("Error spawning acs because of {:?}", status_acs.err().unwrap());
         }
-        
+
         let status_acs_2 = acs::Context::spawn(
             acs_2_config,
             acs_2_recv,
             acs_2_out_send,
+            port_sep_acs_2,
             false,
         );
         

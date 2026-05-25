@@ -124,6 +124,8 @@ impl Context{
             .sum()
     }
 
+    #[allow(dead_code)] // Preserved as fallback API; the hot caller in lin_mult.rs
+    // now uses the batched GEMM path via `matrix_matrix_multiply(&party_powers, …)`.
     pub(crate) fn evaluate_polynomial_from_coefficients_at_position(
         coefficients: Vec<LargeField>,
         evaluation_point: LargeField,
