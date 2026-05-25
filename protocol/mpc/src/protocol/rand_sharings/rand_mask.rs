@@ -168,13 +168,27 @@ impl Context{
                 
                 let mut outputs = Vec::new();
                 for out in unmasked_outputs{
+                    // Mirrors `input.rs::convert_string_to_large_field` (7 payload bytes
+                    // per 8-byte limb, byte 0 of each limb is the unused high-zero that
+                    // keeps the limb value below 2^56 so Mersenne-61 reduction stays a
+                    // no-op). Concatenate the four 7-byte payloads and strip the
+                    // left-side zero padding inserted at encode time.
                     let reverse_conversion = |fe: &LargeField| -> String {
                         let bytes = fe.to_bytes_be();
-                        let s: String = bytes.iter().map(|&b| b as char).collect();
-                        s
+                        let mut payload = Vec::with_capacity(28);
+                        for chunk in 0..4 {
+                            payload.extend_from_slice(&bytes[chunk * 8 + 1..chunk * 8 + 8]);
+                        }
+                        let first_nonzero = payload
+                            .iter()
+                            .position(|&b| b != 0)
+                            .unwrap_or(payload.len());
+                        payload[first_nonzero..]
+                            .iter()
+                            .map(|&b| b as char)
+                            .collect()
                     };
-                    let trimmed_str = reverse_conversion(&out).trim_matches('\0').to_string();
-                    outputs.push(trimmed_str);
+                    outputs.push(reverse_conversion(&out));
                 }
                 println!("Broadcast output: {:?}", outputs);
                 let ser_msg = bincode::serialize(&outputs).unwrap();
