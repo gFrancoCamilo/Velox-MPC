@@ -1,6 +1,8 @@
-use lambdaworks_math::{polynomial::Polynomial};
+use lambdaworks_math::polynomial::Polynomial;
 use protocol::ByteConversion;
-use protocol::{LargeFieldSer, LargeField};
+use protocol::{
+    LargeField, LargeFieldSer, inverse_vandermonde, matrix_matrix_multiply, vandermonde_matrix,
+};
 
 use crate::{Context, msg::ProtMsg, protocol::tuple_verification::ex_compr_state::ExComprState};
 
@@ -36,11 +38,14 @@ impl Context{
             sender, depth);
         
         if ex_compr_state.coin_toss_shares.0.len() >= self.num_faults + 1 && ex_compr_state.coin_output.is_none(){
-            // Reconstruct coin with these points
-            let polynomial = Polynomial::interpolate(
-                &ex_compr_state.coin_toss_shares.0[0..self.num_faults+1], 
-                &ex_compr_state.coin_toss_shares.1[0..self.num_faults+1],
-            ).unwrap();
+            // Reconstruct the coin via the GEMM dispatcher (single-poly, but kept
+            // on the GEMM pipeline so it dispatches consistently with the rest of
+            // the protocol; the 50k bailout keeps tiny inputs on CPU).
+            let xs = ex_compr_state.coin_toss_shares.0[0..self.num_faults + 1].to_vec();
+            let ys = ex_compr_state.coin_toss_shares.1[0..self.num_faults + 1].to_vec();
+            let inv_vdm = inverse_vandermonde(vandermonde_matrix(xs));
+            let coeffs_mat = matrix_matrix_multiply(&inv_vdm, &[ys], false);
+            let polynomial = Polynomial::new(&coeffs_mat[0]);
             let coin_value = polynomial.evaluate(&LargeField::zero());
             ex_compr_state.coin_output = Some(coin_value.clone());
             if depth == self.delinearization_depth{

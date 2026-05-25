@@ -36,34 +36,37 @@ pub fn sample_polynomials_from_prf(
 }
 
 pub async fn generate_evaluation_points(
-    evaluations_prf: Vec<Vec<LargeField>>, 
+    evaluations_prf: Vec<Vec<LargeField>>,
     degree: usize,
     shares_total: usize,
-) -> (Vec<Vec<LargeField>>, 
+) -> (Vec<Vec<LargeField>>,
     Vec<Polynomial<LargeField>>
 ){
+    // Routed through `matrix_matrix_multiply` so the GPU dispatcher picks it up
+    // under `--features gpu`. Mirrors `generate_evaluation_points_opt` — see that
+    // function for the layout commentary.
 
-    // The first evaluation is always at 0
     let mut evaluation_points = Vec::new();
     evaluation_points.push(LargeField::from(0u64));
-    for i in 0..degree{
+    for i in 0..degree {
         evaluation_points.push(LargeField::from((i + 1) as u64));
     }
-    
-    // Generate coefficients of polynomial and then evaluate the polynomial at n points
-    let coefficients: Vec<Polynomial<LargeField>> = evaluations_prf.into_par_iter().map(|evals| {
-        return Polynomial::interpolate(evaluation_points.as_slice(), evals.as_slice()).unwrap()
-    }).collect();
 
-    // Evaluate the polynomial at n points
-    let evaluations_full = coefficients.par_iter().map(|polynomial|{
-        let mut eval_vec_ind = Vec::new();
-        for index in 0..shares_total{
-            eval_vec_ind.push(polynomial.evaluate(&LargeField::from((index + 1) as u64)));
-        }
-        return eval_vec_ind;
-    }).collect();
-    (evaluations_full,coefficients)
+    let inverse_vandermonde_mat = inverse_vandermonde(vandermonde_matrix(evaluation_points.clone()));
+    let coeffs_mat = matrix_matrix_multiply(&inverse_vandermonde_mat, &evaluations_prf, false);
+
+    let share_points: Vec<LargeField> = (1..=shares_total)
+        .map(|i| LargeField::from(i as u64))
+        .collect();
+    let share_powers = powers_matrix(&share_points, degree + 1);
+    let evaluations_full = matrix_matrix_multiply(&share_powers, &coeffs_mat, false);
+
+    let coefficients: Vec<Polynomial<LargeField>> = coeffs_mat
+        .par_iter()
+        .map(|row| Polynomial::new(row))
+        .collect();
+
+    (evaluations_full, coefficients)
 }
 
 pub async fn generate_evaluation_points_opt(

@@ -2,7 +2,10 @@ use std::collections::{HashMap, VecDeque, HashSet};
 
 use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
-use protocol::{AvssShare, LargeField, LargeFieldSer};
+use protocol::{
+    AvssShare, LargeField, LargeFieldSer, inverse_vandermonde, matrix_matrix_multiply,
+    vandermonde_matrix,
+};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use types::Replica;
 
@@ -108,11 +111,16 @@ impl Context{
                     }
                 }
             }
-            // Interpolate polynomials
-            let reconstructed_secrets: Vec<LargeField> = evaluations.into_par_iter().map(|x| {
-                let poly = Polynomial::interpolate(&evaluation_indices, &x).unwrap();
-                return poly.evaluate(&LargeField::zero());
-            }).collect();
+            // Batched Lagrange interpolation routed through `matrix_matrix_multiply`
+            // so the dispatcher picks the GPU path under `--features gpu`. We only
+            // need the polynomials at `LargeField::zero()`, which is row 0 of the
+            // recovered coefficient matrix (the constant term).
+            let inv_vdm = inverse_vandermonde(vandermonde_matrix(evaluation_indices.clone()));
+            let coeffs_mat = matrix_matrix_multiply(&inv_vdm, &evaluations, false);
+            let reconstructed_secrets: Vec<LargeField> = coeffs_mat
+                .into_par_iter()
+                .map(|coeffs| coeffs.into_iter().next().unwrap_or_else(LargeField::zero))
+                .collect();
             log::info!("Reconstructed AVSS contributions of the output mask from origin {}", origin);
             self.output_mask_state.public_reconstruction_outputs.insert(origin, reconstructed_secrets);
             // Remove the origin from the acs_recon_set

@@ -1,6 +1,6 @@
 use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
-use protocol::{LargeField, LargeFieldSer};
+use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_matrix_multiply};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, IntoParallelRefIterator};
 
 use crate::{Context, msg::ProtMsg};
@@ -140,12 +140,20 @@ impl Context{
                 y_polynomial_evaluations_vector[outer_index].push(y_point.clone());
             } 
         }
-        let x_polynomials: Vec<Polynomial<LargeField>> = x_polynomial_evaluations_vector.into_par_iter().map(|evaluations| {
-            return Polynomial::interpolate(&first_set_eval_points, &evaluations).unwrap();
-        }).collect();
-        let y_polynomials: Vec<Polynomial<LargeField>> = y_polynomial_evaluations_vector.into_par_iter().map(|evaluations| {
-            return Polynomial::interpolate(&first_set_eval_points, &evaluations).unwrap();
-        }).collect();
+        // Routed through `matrix_matrix_multiply` so the dispatcher picks up the
+        // GPU path under `--features gpu`. The two batches share the same
+        // evaluation points, so the inverse-Vandermonde is computed once.
+        let inv_vdm_first_set = inverse_vandermonde(vandermonde_matrix(first_set_eval_points.clone()));
+        let x_coeffs_mat = matrix_matrix_multiply(&inv_vdm_first_set, &x_polynomial_evaluations_vector, false);
+        let y_coeffs_mat = matrix_matrix_multiply(&inv_vdm_first_set, &y_polynomial_evaluations_vector, false);
+        let x_polynomials: Vec<Polynomial<LargeField>> = x_coeffs_mat
+            .par_iter()
+            .map(|row| Polynomial::new(row))
+            .collect();
+        let y_polynomials: Vec<Polynomial<LargeField>> = y_coeffs_mat
+            .par_iter()
+            .map(|row| Polynomial::new(row))
+            .collect();
 
         // Evaluate polynomials on second set of points and collect them.
 
@@ -238,7 +246,12 @@ impl Context{
         let (mut evaluation_points,evaluation_points_2) = Self::gen_evaluation_points_ex_compr(ex_compr_state.mult_sharings.len());
         evaluation_points.extend(evaluation_points_2);
 
-        let h_polynomial = Polynomial::interpolate(&evaluation_points, &h_shares).unwrap();
+        // Routed through `matrix_matrix_multiply` for dispatcher-driven GPU path.
+        // Single-poly interpolation: the 50k-element bailout will keep it on CPU
+        // regardless, but the call site lives on the GEMM pipeline for uniformity.
+        let h_inv_vdm = inverse_vandermonde(vandermonde_matrix(evaluation_points.clone()));
+        let h_coeffs_mat = matrix_matrix_multiply(&h_inv_vdm, &[h_shares.clone()], false);
+        let h_polynomial = Polynomial::new(&h_coeffs_mat[0]);
         log::info!("Interpolated H polynomial with degree {} at ExCompr at depth {}", h_polynomial.degree(), depth);
 
         // Evaluate x,y,h polynomials at a random point to get final value at this level
