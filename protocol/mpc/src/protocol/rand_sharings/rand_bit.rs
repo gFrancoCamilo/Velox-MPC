@@ -1,7 +1,8 @@
-use std::{cmp::Ordering, ops::{Mul}};
+use std::ops::Mul;
 
-use lambdaworks_math::{polynomial::Polynomial};
+use lambdaworks_math::polynomial::Polynomial;
 use protocol::ByteConversion;
+use protocol::mersenne_61::Sqrt;
 use protocol::{LargeFieldSer, LargeField, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply};
 use rayon::prelude::{IntoParallelIterator, ParallelIterator, IndexedParallelIterator};
 use types::Replica;
@@ -53,19 +54,17 @@ impl Context{
             let vdm_matrix = vandermonde_matrix(indices);
             let inv_vdm_matrix = inverse_vandermonde(vdm_matrix);
             
-            // TODO: rand_bit reconstruction below uses prime-field square root + p/2
-            // comparison, both of which are undefined for the Mersenne61 Fp4 extension
-            // field that velox now uses. Reworking random-bit generation for extension
-            // fields is out of scope for the GPU/field-switch slice — placeholder logic
-            // here just returns the secret unchanged so the build is green and the rest
-            // of the protocol exercises GPU GEMM end-to-end. Rand-bit-dependent paths
-            // will need a separate fix.
-            let _field_div_2 = self.field_div_2.clone();
+            // Reconstruct each secret, take its square root in Fp4_61 via the
+            // local `Sqrt` trait (Scott's complex method recursing Fp4 → Fp2 → Fp),
+            // and invert. Matches async_mpc's pub_rec.rs:78 pattern — discard the
+            // sign-choice branch (`let (sqrt, _) = ...`); the randomness comes
+            // from upstream `r`, not from which root is picked.
             let reconstructed_square_inverses: Vec<LargeField> = shares_index_wise.into_par_iter()
                 .map(|x| {
                     let coefficients = matrix_vector_multiply(&inv_vdm_matrix, &x);
                     let secret = Polynomial::new(&coefficients).evaluate(&LargeField::from(0 as u64));
-                    secret.inv()
+                    let (sqrt_root, _) = Sqrt::sqrt(&secret).expect("Square root does not exist");
+                    sqrt_root.inv()
                 })
                 .filter(|x| x.is_ok())
                 .map(|x| x.unwrap())
