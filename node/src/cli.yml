@@ -33,11 +33,6 @@ args:
         long: messages
         help: Number of messages to broadcast anonymously
         takes_value: true
-    - batchsize:
-        short: b
-        long: batchsize
-        help: Number of secrets to share in each batch in the preprocessing phase
-        takes_value: true
     - comp:
         short: o
         long: comp

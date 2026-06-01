@@ -1,6 +1,5 @@
 use std::collections::{HashMap, VecDeque, HashSet};
 
-use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
 use protocol::{
     AvssShare, LargeField, LargeFieldSer, inverse_vandermonde, matrix_matrix_multiply,

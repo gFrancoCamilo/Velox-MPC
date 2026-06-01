@@ -2,10 +2,10 @@ use std::{ops::{Mul, Add, Sub}};
 
 use crate::Context;
 use crypto::{hash::{do_hash, Hash}, aes_hash::MerkleTree};
-use lambdaworks_math::{unsigned_integer::element::UnsignedInteger, polynomial::Polynomial};
+use lambdaworks_math::polynomial::Polynomial;
 use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element};
-use rand::random;
+
 use types::Replica;
 
 use super::ACSSABState;

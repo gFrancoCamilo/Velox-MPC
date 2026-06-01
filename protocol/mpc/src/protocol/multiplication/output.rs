@@ -97,11 +97,18 @@ impl Context{
         }
         log::info!("Party {} successfully reconstructed output wires", sender);
         self.mult_state.output_layer.broadcasted_masked_outputs.insert(sender, output_value);
-        let _status = self.acs_2_event_send.send((1,sender, Vec::new())).await;
+        if self.mult_state.output_layer.broadcasted_masked_outputs.len() == self.num_nodes-self.num_faults{
+            // TODO: Add coins for coin hybrid model
+            let coins: Vec<consensus::LargeFieldSer> = (0..30).into_iter().map(|x| consensus::LargeField::from(x as u64).to_bytes_be()).collect();
+            let parties_output: Vec<usize> = self.mult_state.output_layer.broadcasted_masked_outputs.keys().into_iter().map(|x| x.clone()).collect();
+            let parties_ser_output = bincode::serialize(&parties_output).unwrap();
+            let _status = self.acs_2_event_send.send((1, parties_ser_output, coins)).await;        
+        }
         self.verify_masked_output_reconstruction_termination().await;
     }
 
-    pub async fn handle_prot_end_ba_output(&mut self, acs_vec: Vec<Replica>){
+    pub async fn handle_prot_end_ba_output(&mut self, acs_vec: Vec<u8>){
+        let acs_vec: Vec<usize> = bincode::deserialize(&acs_vec).unwrap();
         self.mult_state.output_layer.acs_output.extend(acs_vec.clone());
         self.verify_masked_output_reconstruction_termination().await;
     }

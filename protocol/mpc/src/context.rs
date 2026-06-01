@@ -51,7 +51,6 @@ pub struct Context {
     
     pub k_value: usize,
     pub log_k: usize,
-    pub per_batch_maximum: usize,
     pub tot_batches: usize,
 
     pub total_sharings_for_coins: usize,
@@ -71,14 +70,14 @@ pub struct Context {
     pub sh2t_send: Sender<(usize, Vec<LargeFieldSer>)>,
     pub sh2t_out_recv: Receiver<(usize, Replica, Option<Vec<LargeFieldSer>>)>,
 
-    pub acs_event_send: Sender<(usize,usize, Vec<Hash>)>,
-    pub acs_out_recv: Receiver<(usize,Vec<usize>)>,
+    pub acs_event_send: Sender<(usize,Vec<u8>, Vec<Hash>)>,
+    pub acs_out_recv: Receiver<(usize,Vec<u8>)>,
 
     pub ctrbc_event_send: Sender<Vec<u8>>,
     pub ctrbc_out_recv: Receiver<(usize, Replica, Vec<u8>)>,
 
-    pub acs_2_event_send: Sender<(usize,usize, Vec<Hash>)>,
-    pub acs_2_out_recv: Receiver<(usize,Vec<usize>)>,
+    pub acs_2_event_send: Sender<(usize, Vec<u8>, Vec<Hash>)>,
+    pub acs_2_out_recv: Receiver<(usize,Vec<u8>)>,
 
     // Housekeeping processes for tracking metrics of the protocol
     pub sync_send: TcpReliableSender<Replica, SyncMsg, Acknowledgement>,
@@ -118,7 +117,6 @@ pub struct Context {
 impl Context {
     pub fn spawn(
         config: Node,
-        per_batch: usize,
         mixing_batch_size: usize,
         compression_factor: usize,
         _byz: bool
@@ -136,8 +134,8 @@ impl Context {
         let port_acss_ab: u16 = 0;
         let port_sh2t: u16 = 600;
         let port_acs: u16 = 1200;
-        let port_ctrbc = 1800;
-        let port_acs_2 = 1950;
+        let port_ctrbc = 2000;
+        let port_acs_2 = 2200;
 
         for (replica, address) in config.net_map.iter() {
             let address: SocketAddr = address.parse().expect("Unable to parse address");
@@ -231,7 +229,7 @@ impl Context {
         let sqrt_power = LargeField::zero();
         
         let tot_sharings = (((k)*log_k*log_k)/(config.num_faults+1))+20;
-        let num_batches = (tot_sharings.max(per_batch))/per_batch;
+        let num_batches = 1;
         // Ensure this is a power of 2. 
 
         let high_threshold = 2*config.num_faults+1;
@@ -269,7 +267,6 @@ impl Context {
 
                 k_value: k,
                 log_k: log_k,
-                per_batch_maximum: per_batch,
                 tot_batches: num_batches,
 
                 total_sharings_for_coins: 10*config.num_nodes,
@@ -371,14 +368,13 @@ impl Context {
         // triples at base+{1350,1500,1650} for acs and base+{2200,2450,2700} for
         // acs_2 — clear of the fixed offsets {0,600,1200,1800,1950} already in use
         // and clear of each other.
-        let port_sep_acs: u16 = 150;
-        let port_sep_acs_2: u16 = 250;
+        // let port_sep_acs: u16 = 150;
+        // let port_sep_acs_2: u16 = 250;
 
-        let status_acs = acs::Context::spawn(
+        let status_acs = fin_mvba::Context::spawn(
             acs_config,
             acs_inp_recv,
             acs_out_send,
-            port_sep_acs,
             false,
         );
 
@@ -386,11 +382,10 @@ impl Context {
             log::error!("Error spawning acs because of {:?}", status_acs.err().unwrap());
         }
 
-        let status_acs_2 = acs::Context::spawn(
+        let status_acs_2 = fin_mvba::Context::spawn(
             acs_2_config,
             acs_2_recv,
             acs_2_out_send,
-            port_sep_acs_2,
             false,
         );
         

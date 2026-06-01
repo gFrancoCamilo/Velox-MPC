@@ -1,9 +1,7 @@
 use crate::Context;
 use crypto::{hash::{do_hash, Hash}};
-use lambdaworks_math::{unsigned_integer::element::UnsignedInteger};
 use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element};
-use rand::random;
 use types::Replica;
 
 impl Context{

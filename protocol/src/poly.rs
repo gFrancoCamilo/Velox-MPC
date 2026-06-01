@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::{Mul, Sub, Add}};
 
 use crypto::hash::do_hash;
-use lambdaworks_math::{unsigned_integer::element::UnsignedInteger, polynomial::Polynomial};
+use lambdaworks_math::polynomial::Polynomial;
 use rand::random;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{SeedableRng, RngCore};

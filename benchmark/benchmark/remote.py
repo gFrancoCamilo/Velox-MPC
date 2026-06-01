@@ -215,7 +215,6 @@ class Bench:
                 cmd = CommandMaker.run_syncer(
                     PathMaker.key_file(i),
                     bench_parameters.num_messages,
-                    bench_parameters.batch_size,
                     bench_parameters.compression_factor
                 )
                 print('Running the following command on the remote machine:', cmd)
@@ -224,7 +223,6 @@ class Bench:
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
                 bench_parameters.num_messages,
-                bench_parameters.batch_size,
                 bench_parameters.compression_factor
             )
             log_file = PathMaker.primary_log_file(i)
@@ -242,7 +240,6 @@ class Bench:
                 cmd = CommandMaker.run_syncer(
                     PathMaker.key_file(i),
                     bench_parameters.num_messages,
-                    bench_parameters.batch_size,
                     bench_parameters.compression_factor
                 )
                 print(cmd)
@@ -251,7 +248,6 @@ class Bench:
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
                 bench_parameters.num_messages,
-                bench_parameters.batch_size,
                 bench_parameters.compression_factor
             )
             log_file = PathMaker.primary_log_file(i)

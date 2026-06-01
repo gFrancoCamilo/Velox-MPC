@@ -15,9 +15,8 @@ TYPE=${TYPE:="release"}
     --protocol sync \
     --syncer $TESTDIR/syncer \
     --messages $2 \
-    --batchsize $3 \
-    --comp $4 \
-    --byzantine false > logs/syncer_n_$1_$2_$3_$4.log &
+    --comp $3 \
+    --byzantine false > logs/syncer_n_$1_$2_$3.log &
 
 for((i=0;i<$1;i++)); do
 ./target/$TYPE/node \
@@ -26,9 +25,8 @@ for((i=0;i<$1;i++)); do
     --protocol mpc \
     --syncer $TESTDIR/syncer \
     --messages $2 \
-    --batchsize $3 \
-    --comp $4 \
-    --byzantine false > logs/party-$i-n_$1_$2_$3_$4.log &
+    --comp $3 \
+    --byzantine false > logs/party-$i-n_$1_$2_$3.log &
 done
 
 # Kill all nodes sudo lsof -ti:7000-7015 | xargs kill -9

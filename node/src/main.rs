@@ -28,10 +28,6 @@ async fn main() -> Result<()> {
         .value_of("messages")
         .expect("Unable to parse number of batches")
         .parse::<usize>().unwrap();
-    let per_batch = m
-        .value_of("batchsize")
-        .expect("Unable to parse per batch")
-        .parse::<usize>().unwrap();
     let compression_factor = m
         .value_of("comp")
         .expect("Unable to parse compression factor")
@@ -107,7 +103,6 @@ async fn main() -> Result<()> {
             exit_tx =
                 mpc::Context::spawn(
                     config, 
-                    per_batch,
                     mixing_batch_size,
                     compression_factor,
                     node_normal

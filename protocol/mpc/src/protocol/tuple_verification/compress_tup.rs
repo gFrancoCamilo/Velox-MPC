@@ -1,7 +1,7 @@
 use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_matrix_multiply};
-use rayon::prelude::{IntoParallelIterator, ParallelIterator, IntoParallelRefIterator};
+use rayon::prelude::{ParallelIterator, IntoParallelRefIterator};
 
 use crate::{Context, msg::ProtMsg};
 
