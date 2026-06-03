@@ -25,6 +25,9 @@ use crypto::{aes_hash::HashState, hash::Hash};
 
 use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, input::read_input_from_files, msg::ProtMsg, protocol::{online_phase::mix_circuit_state::MixCircuitState, rand_sharings::rand_mask::RandomOutputMaskStruct, MultState, RandSharings, VerificationState}};
 
+/// Number of coins sent to the MVBA/ACS instances to facilitate consensus.
+pub const NUM_CONSENSUS_COINS: usize = 500;
+
 pub struct Context {
     /// Networking context
     pub net_send: TcpReliableSender<Replica, WrapperMsg<ProtMsg>, Acknowledgement>,

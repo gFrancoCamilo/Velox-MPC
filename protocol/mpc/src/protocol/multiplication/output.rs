@@ -99,7 +99,7 @@ impl Context{
         self.mult_state.output_layer.broadcasted_masked_outputs.insert(sender, output_value);
         if self.mult_state.output_layer.broadcasted_masked_outputs.len() == self.num_nodes-self.num_faults{
             // TODO: Add coins for coin hybrid model
-            let coins: Vec<consensus::LargeFieldSer> = (0..30).into_iter().map(|x| consensus::LargeField::from(x as u64).to_bytes_be()).collect();
+            let coins: Vec<consensus::LargeFieldSer> = (0..crate::context::NUM_CONSENSUS_COINS).into_iter().map(|x| consensus::LargeField::from(x as u64).to_bytes_be()).collect();
             let parties_output: Vec<usize> = self.mult_state.output_layer.broadcasted_masked_outputs.keys().into_iter().map(|x| x.clone()).collect();
             let parties_ser_output = bincode::serialize(&parties_output).unwrap();
             let _status = self.acs_2_event_send.send((1, parties_ser_output, coins)).await;        

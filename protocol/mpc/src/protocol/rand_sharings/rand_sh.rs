@@ -154,7 +154,7 @@ impl Context{
             self.rand_sharings_state.acss_completed_parties.insert(sender);
 
             if self.rand_sharings_state.acss_completed_parties.len() == self.num_nodes-self.num_faults{
-                let coins: Vec<consensus::LargeFieldSer> = (0..30).into_iter().map(|x| consensus::LargeField::from(x as u64).to_bytes_be()).collect();
+                let coins: Vec<consensus::LargeFieldSer> = (0..crate::context::NUM_CONSENSUS_COINS).into_iter().map(|x| consensus::LargeField::from(x as u64).to_bytes_be()).collect();
                 let parties_set: Vec<usize> = self.rand_sharings_state.acss_completed_parties.clone().into_iter().collect();
                 let ser_set = bincode::serialize(&parties_set).unwrap();
                 let _status = self.acs_event_send.send((1, ser_set, coins)).await;
