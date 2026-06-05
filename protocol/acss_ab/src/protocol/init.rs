@@ -227,6 +227,10 @@ impl Context{
         }
 
         let acss_ab_state = self.acss_ab_state.get_mut(&instance_id).unwrap();
+        if acss_ab_state.acss_status.contains(&sender){
+            // Dealer already terminated and its state was cleared; ignore.
+            return;
+        }
         if acss_ab_state.verification_status.contains_key(&sender){
             // Already verified status, abandon sharing
             return;

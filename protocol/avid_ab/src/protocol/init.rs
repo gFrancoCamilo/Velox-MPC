@@ -100,6 +100,10 @@ impl Context {
         }
         
         let avid_state = self.avid_context.get_mut(&instance_id).unwrap();
+        if avid_state.terminated{
+            // Instance already terminated and its state was cleared; ignore late Init.
+            return;
+        }
         let indices = msg.indices();
         avid_state.fragments = Some(msg);
         

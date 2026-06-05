@@ -13,6 +13,10 @@ impl Context{
             self.acss_ab_state.insert(instance_id, acss_state);
         }
         let acss_state = self.acss_ab_state.get_mut(&instance_id).unwrap();
+        if acss_state.acss_status.contains(&sender_rep){
+            // Dealer already terminated and its state was cleared; ignore late CTRBC.
+            return;
+        }
         acss_state.commitments.insert(sender_rep, (comm_dzk_vals.0,comm_dzk_vals.1,comm_dzk_vals.2));
 
         // Interpolate shares here for first t parties

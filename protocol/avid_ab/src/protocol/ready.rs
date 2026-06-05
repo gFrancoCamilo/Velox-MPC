@@ -106,10 +106,12 @@ impl Context {
                 avid_context.terminated = true;
                 if &message[0..32] == self.zero_hash{
                     log::info!("Received dummy message, not sending to parent process");
+                    // Instance terminated: free all buffers associated with it.
+                    avid_context.clear_state();
                     return;
                 }
 
-                log::info!("Delivered message through AVID from sender {} for instance ID {}",avid_context.sender,instance_id);    
+                log::info!("Delivered message through AVID from sender {} for instance ID {}",avid_context.sender,instance_id);
                 log::info!("Trying to decrypt message with length {} with secret key of {}", message.len(), origin);
                 // decrypt message
 
@@ -119,6 +121,8 @@ impl Context {
                 if status.is_err(){
                     log::error!("Error sending message to parent channel {:?}", status.unwrap_err());
                 }
+                // Output delivered: free all buffers associated with this instance.
+                avid_context.clear_state();
             }
         }
     }

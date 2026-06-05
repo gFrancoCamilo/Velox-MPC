@@ -13,8 +13,12 @@ impl Context{
                 self.sh2t_state_map.insert(instance_id, sh2t_state);
             }
             let sh2t_state = self.sh2t_state_map.get_mut(&instance_id).unwrap();
+            if sh2t_state.status.contains(&sender){
+                // Dealer already terminated and its state was cleared; ignore late AVID.
+                return;
+            }
             log::info!("Deserialization successful in AVID for sender {}",sender);
-            
+
             sh2t_state.shares.insert(sender, shares);
             self.verify_shares(sender, instance_id).await;
         }

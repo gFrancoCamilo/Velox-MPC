@@ -10,6 +10,10 @@ impl Context{
             self.sh2t_state_map.insert(instance_id, sh2t_state);
         }
         let sh2t_state = self.sh2t_state_map.get_mut(&instance_id).unwrap();
+        if sh2t_state.status.contains(&sender){
+            // Dealer already terminated and its state was cleared; ignore late RA.
+            return;
+        }
         if value == 1{
             sh2t_state.ra_outputs.insert(sender);
         }
@@ -36,11 +40,15 @@ impl Context{
                 let shares = sh2t_state.shares.get(&sender).unwrap().clone();
                 let _status = self.out_acss.send((instance_id, sender,Some(shares.0))).await;
                 sh2t_state.status.insert(sender);
+                // Dealer's sharing has terminated: release all per-dealer buffers.
+                sh2t_state.clear_dealer_state(&sender);
                 // self.terminate("Hello".to_string(), instance_id, sender).await;
             }
             else{
                 let _status = self.out_acss.send((instance_id, sender,None)).await;
                 sh2t_state.status.insert(sender);
+                // Sharing rejected: the dealer is done, release its buffers.
+                sh2t_state.clear_dealer_state(&sender);
             }
         }
     }

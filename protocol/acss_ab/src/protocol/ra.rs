@@ -13,6 +13,10 @@ impl Context{
             self.acss_ab_state.insert(instance_id, acss_state);
         }
         let acss_state = self.acss_ab_state.get_mut(&instance_id).unwrap();
+        if acss_state.acss_status.contains(&sender){
+            // Dealer already terminated and its state was cleared; ignore late RA.
+            return;
+        }
         if value == 1{
             acss_state.ra_outputs.insert(sender);
         }
@@ -55,12 +59,19 @@ impl Context{
                     let shares = acss_state.shares.get(&sender).unwrap().clone();
                     let _status = self.out_acss.send((instance_id,sender,Some(shares.0))).await;
                     acss_state.acss_status.insert(sender);
+                    // Dealer's sharing has terminated for this (non-AVSS) instance:
+                    // release all per-dealer buffers.
+                    acss_state.clear_dealer_state(&sender);
                 }
                 //self.terminate("Hello".to_string()).await;
             }
             else{
                 let _status = self.out_acss.send((instance_id, sender,None)).await;
                 acss_state.acss_status.insert(sender);
+                // Sharing rejected: the dealer is done, release its buffers. Safe
+                // even for the AVSS instance since a rejected dealer is never
+                // served by the reconstruction oracle.
+                acss_state.clear_dealer_state(&sender);
             }
         }
     }

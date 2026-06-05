@@ -26,4 +26,15 @@ impl Sh2tState{
             status: HashSet::default()
         }
     }
+
+    /// Drop all per-dealer state held for `dealer` once its sharing has
+    /// terminated and the output has been delivered. `status` is retained as a
+    /// tombstone so that late/duplicate CTRBC/AVID/RA messages for the same
+    /// dealer are short-circuited instead of resurrecting the cleared buffers.
+    pub fn clear_dealer_state(&mut self, dealer: &Replica){
+        self.shares.remove(dealer);
+        self.commitments.remove(dealer);
+        self.verification_status.remove(dealer);
+        self.ra_outputs.remove(dealer);
+    }
 }

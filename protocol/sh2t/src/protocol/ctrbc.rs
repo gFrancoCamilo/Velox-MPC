@@ -14,6 +14,10 @@ impl Context{
             self.sh2t_state_map.insert(instance_id, sh2t_state);
         }
         let sh2t_state = self.sh2t_state_map.get_mut(&instance_id).unwrap();
+        if sh2t_state.status.contains(&sender_rep){
+            // Dealer already terminated and its state was cleared; ignore late CTRBC.
+            return;
+        }
 
         sh2t_state.commitments.insert(sender_rep, comm_dzk_vals.0);
 

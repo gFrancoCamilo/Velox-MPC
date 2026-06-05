@@ -138,6 +138,10 @@ impl Context{
         }
         let sh2t_state = self.sh2t_state_map.get_mut(&instance_id).unwrap();
 
+        if sh2t_state.status.contains(&sender){
+            // Dealer already terminated and its state was cleared; ignore.
+            return;
+        }
         if sh2t_state.verification_status.contains_key(&sender){
             // Already verified status, abandon sharing
             return;
