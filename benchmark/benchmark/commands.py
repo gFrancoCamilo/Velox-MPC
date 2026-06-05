@@ -26,24 +26,33 @@ class CommandMaker:
         return f'./node generate_keys --filename {filename}'
 
     @staticmethod
-    def generate_config_files(bport,client_bport,client_run_port,num_nodes):
-        return f'./config --blocksize 100 --delay 100 --base_port {bport} --client_base_port {client_bport} --NumNodes {num_nodes} --target . --client_run_port {client_run_port} --local true'
+    def generate_config_files(bport, client_bport, client_run_port, num_nodes):
+        # Velox's multiplication layer requires n = 3t+1 exactly (see lin_mult.rs:253-265
+        # — the L2 reconstruction produces (n-t) coefficients per group while the
+        # rand-sharing bookkeeping expects (2t+1); equality holds iff n = 3t+1).
+        # The `config` binary defaults faults to (n-1)/2 when --faults is omitted,
+        # which crashes the protocol at depth 0 for any n>4. Force t = (n-1)//3.
+        num_faults = (num_nodes - 1) // 3
+        return (
+            f'./config --blocksize 100 --delay 100 --base_port {bport} '
+            f'--client_base_port {client_bport} --NumNodes {num_nodes} '
+            f'--faults {num_faults} '
+            f'--target . --client_run_port {client_run_port} --local true'
+        )
 
     @staticmethod
-    def run_primary(key,mixing_batch_size,compression_factor,debug=False):
+    def run_primary(key, mixing_batch_size, compression_factor, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        #v = '-vvv' if debug else '-vv'
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
                 f'--protocol mpc --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
-    
+
     @staticmethod
-    def run_syncer(key,batches,per,compression_factor,debug=False):
+    def run_syncer(key, mixing_batch_size, compression_factor, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        #v = '-vvv' if debug else '-vv'
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol sync --syncer syncer --messages {batches} --comp {compression_factor} --byzantine false')
+                f'--protocol sync --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
 
     @staticmethod
     def unzip_tkeys(fileloc, debug=False):
