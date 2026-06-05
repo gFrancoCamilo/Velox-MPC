@@ -107,11 +107,22 @@ class LocalBench:
             #         log_file = PathMaker.client_log_file(i, id)
             #         self._background_run(cmd, log_file)
 
-            # # Run the primaries (except the faulty ones).
+            # # Run the syncer + primaries (syncer colocated with party 0, mirroring remote.py).
             for i in range(nodes):
+                if i == 0:
+                    cmd = CommandMaker.run_syncer(
+                        PathMaker.key_file(i),
+                        self.num_messages,
+                        self.compression_factor,
+                        debug=debug,
+                    )
+                    log_file = PathMaker.syncer_log_file()
+                    self._background_run(cmd, log_file)
                 cmd = CommandMaker.run_primary(
                     PathMaker.key_file(i),
-                    debug=debug
+                    self.num_messages,
+                    self.compression_factor,
+                    debug=debug,
                 )
                 log_file = PathMaker.primary_log_file(i)
                 self._background_run(cmd, log_file)
