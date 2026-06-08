@@ -53,6 +53,23 @@ impl SingleDepthState{
             depth_terminated: false,
         }
     }
+
+    /// Frees the per-party share buffers once this depth has terminated.
+    ///
+    /// By the time a depth terminates, the reconstructed secrets have already
+    /// been cloned into the next depth's inputs, so the raw L1/L2 shares sent by
+    /// other parties (the bulk of this struct's memory, O(n) `LargeField`s per
+    /// group) are dead. The lightweight termination bookkeeping
+    /// (`depth_terminated`, the receive counts, and the hash-vote sets) is kept
+    /// so that any late-arriving share for this depth is still deduped and
+    /// cannot re-trigger reconstruction or termination.
+    pub fn clear_shares(&mut self) {
+        self.l1_shares = (Vec::new(), Vec::new());
+        self.l1_shares_reconstructed = Vec::new();
+        self.l2_shares = (Vec::new(), Vec::new());
+        self.l2_shares_reconstructed = Vec::new();
+        self.util_rand_sharings = Vec::new();
+    }
 }
 
 pub struct OutputLayerState{

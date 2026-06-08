@@ -86,6 +86,14 @@ impl Context{
             // self.choose_multiplication_protocol(a_shares, b_shares, depth)
             // How to handle next depth wires?
             mult_state.depth_terminated = true;
+            // The per-party L1/L2 share buffers for this depth are now dead: the
+            // reconstructed secrets have been cloned into `shares_next_depth`
+            // above and handed to the next depth / verification. Free them. The
+            // termination bookkeeping is retained so late shares stay deduped.
+            // NOTE: this only frees party-sent shares; the multiplication tuples
+            // in `verf_state` are kept, as verification consumes them across all
+            // depths.
+            mult_state.clear_shares();
             if depth == self.preprocessing_mult_depth{
                 // Random bit sharings, add them to mix_circuit state
                 log::info!("Multiplication complete for rand_bit preparation with shares_len: {:?}", shares_next_depth.len());

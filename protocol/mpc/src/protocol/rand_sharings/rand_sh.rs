@@ -243,6 +243,11 @@ impl Context{
                 // Clear acss sharings now
                 self.rand_sharings_state.shares.clear();
                 self.rand_sharings_state.sh2t_shares.clear();
+                // The per-party input ACSS shares were just consumed by
+                // `gen_input_sharings()` above and are not read again (late
+                // senders are short-circuited by the cleared `shares` map). Free
+                // them alongside the other consumed ACSS share buffers.
+                self.mix_circuit_state.input_acss_shares.clear();
 
                 self.generate_random_mask_shares(self.rand_sharings_state.acs_output.clone(),vandermonde_matrix).await;
                 self.init_random_shared_bits_preparation().await;
