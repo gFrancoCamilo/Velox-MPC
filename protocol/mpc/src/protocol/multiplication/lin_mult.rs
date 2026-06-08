@@ -189,7 +189,14 @@ impl Context{
         else{
             depth_state = self.mult_state.depth_share_map.get_mut(&depth).unwrap();
         }
-        // At L1, the evaluation point is the point at which the polynomials have been evaluated. 
+        // If this depth already terminated, its per-party share buffers were
+        // freed by `clear_shares()` (l1_shares.1 is now empty). A late L1 share
+        // is dead - dropping it here avoids indexing the emptied l1_shares.1 out
+        // of bounds below and keeps recv_share_count_l1 / l1_shares.0 consistent.
+        if depth_state.depth_terminated {
+            return;
+        }
+        // At L1, the evaluation point is the point at which the polynomials have been evaluated.
         let evaluation_point = Self::get_share_evaluation_point(sender, self.use_fft.clone(), self.roots_of_unity.clone());
         depth_state.l1_shares.0.push(evaluation_point);
         for (index, share) in shares.into_iter().enumerate(){
@@ -239,6 +246,13 @@ impl Context{
             depth_state = self.mult_state.depth_share_map.get_mut(&depth).unwrap();
         }
         
+        // If this depth already terminated, `clear_shares()` emptied l2_shares,
+        // so the per-group inner vectors are gone. A late L2 share is dead; drop
+        // it to avoid corrupting l2_shares.0 / recv_share_count_l2 against an
+        // empty l2_shares.1.
+        if depth_state.depth_terminated {
+            return;
+        }
         // At this depth, we are using roots of unity to conduct evaluation
         let evaluation_point = self.roots_of_unity.get(sender).clone().unwrap();
         depth_state.l2_shares.0.push(evaluation_point.clone());

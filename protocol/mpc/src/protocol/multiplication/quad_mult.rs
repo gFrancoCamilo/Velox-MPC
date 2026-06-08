@@ -66,6 +66,13 @@ impl Context{
 
         // Add shares to the depth state
         let depth_state = self.mult_state.get_single_depth_state(depth, false, shares_lf.len());
+        // If this depth already terminated, `clear_shares()` emptied l1_shares,
+        // so its per-group inner vectors are gone. A late quadratic share is
+        // dead; drop it to avoid corrupting l1_shares.0 / recv_share_count_l1
+        // against an empty l1_shares.1.
+        if depth_state.depth_terminated {
+            return;
+        }
         depth_state.l1_shares.0.push(evaluation_point.clone()); // Add the evaluation point to the indices
         for (share,shares) 
                 in shares_lf.into_iter().zip(depth_state.l1_shares.1.iter_mut()){
