@@ -199,6 +199,8 @@ class BenchParameters:
 
             self.num_messages = int(json['num_messages'])
 
+            self.num_batches = int(json['num_batches'])
+
             self.batch_size = int(json['batch_size'])
 
             self.compression_factor = int(json['compression_factor'])
