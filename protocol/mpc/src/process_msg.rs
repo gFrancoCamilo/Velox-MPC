@@ -46,9 +46,9 @@ impl Context {
                     log::debug!("Received Init for instance id {} from node : {}", depth, wrapper_msg.sender);
                     self.handle_quadratic_mult_shares(depth,main_msg, wrapper_msg.sender).await;
                 },
-                ProtMsg::ReconstructRandBitShares(shares)=>{
-                    log::debug!("Received ReconstructRandBitShares message");
-                    self.handle_reconstruct_rand_bits(shares, wrapper_msg.sender).await;
+                ProtMsg::ReconstructRandBitShares(batch, shares)=>{
+                    log::debug!("Received ReconstructRandBitShares message for batch {}", batch);
+                    self.handle_reconstruct_rand_bits(batch, shares, wrapper_msg.sender).await;
                 },
                 ProtMsg::ReconstructRandBits(shares)=>{
                     log::debug!("Received ReconstructRandBits message");
