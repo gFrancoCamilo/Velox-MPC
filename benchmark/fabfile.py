@@ -132,7 +132,7 @@ def logs(ctx):
         'faults': 0,
         'nodes': [n],
         'num_messages': num_messages,
-        'batch_size': num_batches,
+        'num_batches': num_batches,
         'compression_factor': compression_factor
     }
     try:
