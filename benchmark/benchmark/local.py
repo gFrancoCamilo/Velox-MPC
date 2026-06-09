@@ -114,6 +114,7 @@ class LocalBench:
                         PathMaker.key_file(i),
                         self.num_messages,
                         self.compression_factor,
+                        self.num_batches,
                         debug=debug,
                     )
                     log_file = PathMaker.syncer_log_file()
@@ -122,6 +123,7 @@ class LocalBench:
                     PathMaker.key_file(i),
                     self.num_messages,
                     self.compression_factor,
+                    self.num_batches,
                     debug=debug,
                 )
                 log_file = PathMaker.primary_log_file(i)

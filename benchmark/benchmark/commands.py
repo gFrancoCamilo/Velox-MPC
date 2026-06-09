@@ -18,7 +18,7 @@ class CommandMaker:
 
     @staticmethod
     def compile():
-        return 'cargo build --quiet --release'
+        return 'cargo build --release'
 
     @staticmethod
     def generate_key(filename):
@@ -41,18 +41,23 @@ class CommandMaker:
         )
 
     @staticmethod
-    def run_primary(key, mixing_batch_size, compression_factor,num_batches, debug=False):
+    def run_primary(key, mixing_batch_size, compression_factor, num_batches, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol mpc --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --rand-batches {num_batches} --byzantine false')
+        # Merge: Akhil's `--rand-batches` plumbing (paces preprocessing into
+        # smaller ACSS instances; fixes the n=49 / k=32768 OOM) + the higher
+        # ulimit (65k FDs needed for the cross-region TCP fan-out at large n).
+        return (f'ulimit -n 65000; ./node --config {key} --ip ip_file '
+                f'--protocol mpc --syncer syncer --messages {mixing_batch_size} '
+                f'--comp {compression_factor} --rand-batches {num_batches} --byzantine false')
 
     @staticmethod
-    def run_syncer(key, mixing_batch_size, compression_factor,num_batches, debug=False):
+    def run_syncer(key, mixing_batch_size, compression_factor, num_batches, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol sync --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --rand-batches {num_batches} --byzantine false')
+        return (f'ulimit -n 65000; ./node --config {key} --ip ip_file '
+                f'--protocol sync --syncer syncer --messages {mixing_batch_size} '
+                f'--comp {compression_factor} --rand-batches {num_batches} --byzantine false')
 
     @staticmethod
     def unzip_tkeys(fileloc, debug=False):
@@ -85,5 +90,12 @@ class CommandMaker:
     @staticmethod
     def alias_binaries(origin):
         assert isinstance(origin, str)
-        node, client, config = join(origin, 'node'), join(origin, 'benchmark_client'), join(origin,'config')
-        return f'rm node ; rm benchmark_client ; rm config ; ln -s {node} . ; ln -s {client} . ; ln -s {config} .'
+        # Velox produces `node` and `config` only — there is no `benchmark_client`
+        # binary, so we drop the dangling symlink it used to create. `&&` instead
+        # of `;` and `test -x` make a failed cargo build fail the deploy step
+        # loudly instead of producing dangling symlinks that only surface later
+        # as `./node: No such file or directory` on the remote run.
+        node, config = join(origin, 'node'), join(origin, 'config')
+        return (f'rm -f node config && '
+                f'ln -sf {node} . && ln -sf {config} . && '
+                f'test -x ./node && test -x ./config')
