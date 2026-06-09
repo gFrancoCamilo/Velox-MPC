@@ -38,6 +38,11 @@ args:
         long: comp
         help: Compression factor for multiplication gate verification
         takes_value: true
+    - rand_batches:
+        short: r
+        long: rand-batches
+        help: Number of sub-batches each random-sharing group is split into (paces ACSS/Sh2t dealing to bound peak memory)
+        takes_value: true
     # - bfile:
     #     short: b
     #     long: bfile

@@ -1,9 +1,20 @@
 use std::collections::{HashMap, VecDeque, HashSet};
 
-use protocol::LargeField;
+use protocol::{LargeField, LargeFieldSer};
 use types::Replica;
 
 pub struct RandSharings{
+    // Prepared-but-not-yet-dealt secret batches, in dispatch order (the vector
+    // index is the ACSS/Sh2t instance id). We hold the raw secrets here and deal
+    // them one batch at a time so that only ~1 ACSS/Sh2t instance is in flight per
+    // module at a time, keeping peak memory bounded for large batch sizes.
+    pub acss_pending: Vec<Vec<LargeFieldSer>>,
+    pub sh2t_pending: Vec<Vec<LargeFieldSer>>,
+    // Index of the next batch to dispatch for each module (also equals the number
+    // already dispatched; the in-flight batch is `cursor - 1`).
+    pub acss_dispatch_cursor: usize,
+    pub sh2t_dispatch_cursor: usize,
+
     // First, add a map of sharings w.r.t. batch size and sender party
     // First map index is the sender party and the second map index is the batch number
     pub shares: HashMap<usize, HashMap<usize, Vec<LargeField>>>,
@@ -27,6 +38,10 @@ pub struct RandSharings{
 impl RandSharings{
     pub fn new() -> Self{
         Self{
+            acss_pending: Vec::new(),
+            sh2t_pending: Vec::new(),
+            acss_dispatch_cursor: 0,
+            sh2t_dispatch_cursor: 0,
             shares: HashMap::default(),
             acss_completed_parties: HashSet::default(),
             sh2t_shares: HashMap::default(),

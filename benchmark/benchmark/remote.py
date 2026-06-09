@@ -223,7 +223,8 @@ class Bench:
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
                 bench_parameters.num_messages,
-                bench_parameters.compression_factor
+                bench_parameters.compression_factor,
+                bench_parameters.num_batches
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)
@@ -248,7 +249,8 @@ class Bench:
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
                 bench_parameters.num_messages,
-                bench_parameters.compression_factor
+                bench_parameters.compression_factor,
+                bench_parameters.num_batches
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)

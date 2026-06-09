@@ -8,6 +8,10 @@ vals=(27000 27100 27200 27300)
 TESTDIR=${TESTDIR:="testdata/$1"}
 TYPE=${TYPE:="release"}
 
+# Optional 4th arg: number of random-sharing sub-batches (--rand-batches).
+# When omitted, the node falls back to mpc::NUM_RAND_BATCHES.
+RAND_BATCHES_ARG=${4:+--rand-batches $4}
+
 # Run the syncer now
 ./target/$TYPE/node \
     --config $TESTDIR/nodes-0.json \
@@ -26,6 +30,7 @@ for((i=0;i<$1;i++)); do
     --syncer $TESTDIR/syncer \
     --messages $2 \
     --comp $3 \
+    $RAND_BATCHES_ARG \
     --byzantine false > logs/party-$i-n_$1_$2_$3.log &
 done
 

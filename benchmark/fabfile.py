@@ -11,7 +11,7 @@ from benchmark.utils import PathMaker
 
 n = 64
 num_messages = 256
-batch_size = 500
+num_batches = 5
 compression_factor = 10
 
 @task
@@ -75,7 +75,7 @@ def remote(ctx, debug=False):
         'faults': 0,
         'nodes': [n],
         'num_messages': num_messages,
-        'batch_size': batch_size,
+        'num_batches': num_batches,
         'compression_factor': compression_factor
     }
     try:
@@ -90,7 +90,7 @@ def rerun(ctx, debug=False):
         'faults': 0,
         'nodes': [n],
         'num_messages': num_messages,
-        'batch_size': batch_size,
+        'num_batches': num_batches,
         'compression_factor': compression_factor
     }
     try:
@@ -132,7 +132,7 @@ def logs(ctx):
         'faults': 0,
         'nodes': [n],
         'num_messages': num_messages,
-        'batch_size': batch_size,
+        'batch_size': num_batches,
         'compression_factor': compression_factor
     }
     try:

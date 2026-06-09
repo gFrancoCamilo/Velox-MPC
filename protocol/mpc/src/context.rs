@@ -28,6 +28,12 @@ use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, input::read
 /// Number of coins sent to the MVBA/ACS instances to facilitate consensus.
 pub const NUM_CONSENSUS_COINS: usize = 500;
 
+/// Default number of sub-batches each random-sharing group is split into, used when
+/// the `--rand-batches` CLI flag is not supplied. The total work
+/// (`tot_batches * total_sharings`) is unchanged; splitting it into more, smaller
+/// ACSS/Sh2t instances (dealt one at a time) bounds peak memory at large batch sizes.
+pub const NUM_RAND_BATCHES: usize = 16;
+
 pub struct Context {
     /// Networking context
     pub net_send: TcpReliableSender<Replica, WrapperMsg<ProtMsg>, Acknowledgement>,
@@ -122,6 +128,7 @@ impl Context {
         config: Node,
         mixing_batch_size: usize,
         compression_factor: usize,
+        num_rand_batches: usize,
         _byz: bool
     ) -> anyhow::Result<oneshot::Sender<()>> {
         // Add a separate configuration for RBC service. 
@@ -232,8 +239,12 @@ impl Context {
         let sqrt_power = LargeField::zero();
         
         let tot_sharings = (((k)*log_k*log_k)/(config.num_faults+1))+20;
-        let num_batches = 1;
-        // Ensure this is a power of 2. 
+        // Split each group across NUM_RAND_BATCHES sub-batches of `per_batch`
+        // sharings each. `num_batches * per_batch >= tot_sharings` (the last batch is
+        // over-provisioned), which is safe: downstream consumers pop only what they need.
+        let num_batches = num_rand_batches.min(tot_sharings).max(1);
+        let per_batch = (tot_sharings + num_batches - 1) / num_batches;
+        // Ensure this is a power of 2.
 
         let high_threshold = 2*config.num_faults+1;
         let inputs_per_party = (k / high_threshold) + 1;
@@ -308,7 +319,7 @@ impl Context {
                 use_fft: use_fft,
                 roots_of_unity: gen_roots_of_unity(config.num_nodes),
 
-                total_sharings: tot_sharings,
+                total_sharings: per_batch,
                 max_depth: log_k*log_k,
                 output_mask_size: 2*k/(config.num_faults+1),
 

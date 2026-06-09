@@ -41,18 +41,18 @@ class CommandMaker:
         )
 
     @staticmethod
-    def run_primary(key, mixing_batch_size, compression_factor, debug=False):
+    def run_primary(key, mixing_batch_size, compression_factor,num_batches, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol mpc --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
+                f'--protocol mpc --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --rand-batches {num_batches} --byzantine false')
 
     @staticmethod
-    def run_syncer(key, mixing_batch_size, compression_factor, debug=False):
+    def run_syncer(key, mixing_batch_size, compression_factor,num_batches, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol sync --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
+                f'--protocol sync --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --rand-batches {num_batches} --byzantine false')
 
     @staticmethod
     def unzip_tkeys(fileloc, debug=False):
