@@ -11,8 +11,8 @@ WORDS = [
 
 # Parameters
 num_files = 112
-lines_per_file = 100
-max_bytes = 31  # must be < 248 bits
+lines_per_file = 2500
+max_bytes = 28  # must be < 248 bits
 
 for file_idx in range(0, num_files):
     filename = f"input_{file_idx}.txt"

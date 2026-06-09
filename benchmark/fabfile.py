@@ -9,9 +9,17 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
-n = 64
-num_messages = 256
-num_batches = 5
+# Merge: keep the user's local run parameters (n=97, k=22000) but switch
+# the pacing knob to Akhil's `num_batches` — the old `batch_size` constant
+# is dead now (there's no `--batchsize` CLI flag; the active pacing flag
+# is `--rand-batches`, which Akhil's commands.py threads through).
+n = 97
+num_messages = 22000
+num_batches = 5            # actual pacing knob: flows into --rand-batches at runtime
+# NAMING-ONLY label kept so PathMaker / config.py / log filenames stay
+# consistent with the pre-Akhil runs (`syncer-n_N_messages_BATCH_comp.log`).
+# Has no runtime effect — the real pacing is `num_batches`.
+batch_size = 500
 compression_factor = 10
 
 @task
@@ -76,6 +84,7 @@ def remote(ctx, debug=False):
         'nodes': [n],
         'num_messages': num_messages,
         'num_batches': num_batches,
+        'batch_size': batch_size,
         'compression_factor': compression_factor
     }
     try:
@@ -91,6 +100,7 @@ def rerun(ctx, debug=False):
         'nodes': [n],
         'num_messages': num_messages,
         'num_batches': num_batches,
+        'batch_size': batch_size,
         'compression_factor': compression_factor
     }
     try:
@@ -133,6 +143,7 @@ def logs(ctx):
         'nodes': [n],
         'num_messages': num_messages,
         'num_batches': num_batches,
+        'batch_size': batch_size,
         'compression_factor': compression_factor
     }
     try:
