@@ -1,4 +1,10 @@
-mod init;
+pub mod init;
+pub use init::{dealer_core_cpu, DealerArtifacts};
+
+#[cfg(feature = "gpu")]
+pub mod init_gpu;
+#[cfg(feature = "gpu")]
+pub use init_gpu::{dealer_core_gpu, AcssGemmCache};
 
 mod ctrbc;
 

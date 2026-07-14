@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+# CUDA acceleration end-to-end: cargo build -p node --features gpu
+# (set CUDA_ARCH to the GPU's compute capability, e.g. CUDA_ARCH=sm_86).
+gpu = ["mpc/gpu", "protocol/gpu"]
+
 [dependencies]
 bincode = "1"
 config = { package = "config", git="https://github.com/akhilsb/Secure-Distributed-Computing-Protocols.git"}

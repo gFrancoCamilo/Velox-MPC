@@ -1,4 +1,3 @@
-use crypto::{hash::do_hash};
 use protocol::ByteConversion;
 use protocol::{LargeFieldSer, LargeField, AvssShare};
 use types::Replica;
@@ -40,7 +39,7 @@ impl Context{
         appended_vec.extend_from_slice(&nonce);
         // Compute Hash
 
-        let commitment = do_hash(&appended_vec);
+        let commitment = self.hash_context.do_hash_aes(&appended_vec);
         if commitment != commitments[share_sender]{
             log::error!("Commitment mismatch for share from sender {} for AVSS from origin {}", share_sender, origin);
             return;

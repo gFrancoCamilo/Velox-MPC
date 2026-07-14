@@ -15,10 +15,20 @@ fn main() {
     println!("cargo:rerun-if-changed=cuda");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CUDA_HOME");
+    println!("cargo:rerun-if-env-changed=CUDA_ARCH");
 
     if env::var_os("CARGO_FEATURE_GPU").is_none() {
         // Default path on any host: do nothing. The protocol crate compiles
         // pure-Rust and the `gpu_ffi` module is gated out at compile time.
+        return;
+    }
+
+    println!("cargo:rerun-if-env-changed=CUDA_SKIP_BUILD");
+    if env::var_os("CUDA_SKIP_BUILD").is_some() {
+        // Type-check the gpu feature on non-CUDA hosts (macOS dev boxes):
+        //   CUDA_SKIP_BUILD=1 cargo check --features gpu
+        // Skips nvcc and emits no link flags, so anything that actually links
+        // (build/test/bench) will fail — check-only.
         return;
     }
 
@@ -37,6 +47,11 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set by cargo"));
     let cuda_src_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("cuda");
 
+    // Match the target GPU's compute capability (e.g. CUDA_ARCH=sm_86).
+    // sm_70 was async_mpc's hard-coded default and its most common build snag.
+    let cuda_arch = env::var("CUDA_ARCH").unwrap_or_else(|_| "sm_70".to_string());
+    let arch_flag = format!("-arch={}", cuda_arch);
+
     // Compile every .cu in cuda/ into a single static archive.
     let mut object_files: Vec<PathBuf> = Vec::new();
     let entries = std::fs::read_dir(&cuda_src_dir)
@@ -51,14 +66,15 @@ fn main() {
         let obj = out_dir.join(format!("{}.o", stem));
 
         let status = Command::new(&nvcc)
+            .arg(&arch_flag)
             .args([
-                "-arch=sm_70",
                 "-O3",
                 "-std=c++17",
                 "--compiler-options",
                 "-fPIC",
                 "-c",
             ])
+            .arg(format!("-I{}", cuda_src_dir.display()))
             .arg(&path)
             .arg("-o")
             .arg(&obj)

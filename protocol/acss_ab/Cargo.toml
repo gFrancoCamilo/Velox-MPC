@@ -5,6 +5,12 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+# CUDA-accelerated ACSS dealer (init_acss_ab). Requires NVIDIA hardware and the
+# CUDA Toolkit at build time; see protocol/build.rs (CUDA_HOME, CUDA_ARCH).
+gpu = ["protocol/gpu"]
+
 [dependencies]
 protocol = { package = "protocol", path="../"}
 
@@ -46,3 +52,10 @@ futures-util = "0"
 reed_solomon_rs = "0.1.2"
 
 lambdaworks-math = "=0.13.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "acss_init"
+harness = false

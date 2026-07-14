@@ -172,6 +172,48 @@ int field_gemm_compute(struct FieldGEMMContext* ctx,
     return cuda_ok(cudaStreamSynchronize(impl->stream)) ? 0 : -8;
 }
 
+// Like field_gemm_compute, but S is already resident on the device (no H2D)
+// and the result stays in the context's output buffer (no D2H). Chain GEMMs
+// by feeding one context's output pointer as the next call's d_s_bytes.
+// Ported from async_mpc/fields/cuda/gpu_field_gemm_wrapper.cu.
+int field_gemm_compute_d2d(struct FieldGEMMContext* ctx,
+                           const unsigned char* d_s_bytes,
+                           unsigned int batch) {
+    if (ctx == nullptr || d_s_bytes == nullptr) return -1;
+    auto* impl = reinterpret_cast<FieldGEMMContextImpl*>(ctx);
+
+    const size_t es = elem_size_for(impl->field_id);
+    if (es == 0) return -2;
+
+    const size_t o_need = static_cast<size_t>(batch) * impl->N * es;
+    if (ensure_capacity(&impl->d_O, &impl->o_capacity, o_need) != 0) return -4;
+
+    // Point the launch at the caller's device buffer for this call only.
+    unsigned char* own_d_S = impl->d_S;
+    impl->d_S = const_cast<unsigned char*>(d_s_bytes);
+
+    int rc = 0;
+    switch (impl->field_id) {
+        case FIELD_M61_FP:  rc = launch_gemm_typed<unsigned long long>(impl, batch); break;
+        case FIELD_M61_FP2: rc = launch_gemm_typed<Fp2_61>(impl, batch); break;
+        case FIELD_M61_FP4: rc = launch_gemm_typed<Fp4_61>(impl, batch); break;
+        default: rc = -6;
+    }
+    const bool synced = cuda_ok(cudaStreamSynchronize(impl->stream));
+    impl->d_S = own_d_S;
+
+    if (rc != 0) return rc;
+    return synced ? 0 : -8;
+}
+
+// Raw device pointer to the GEMM output. Valid until the next
+// field_gemm_compute* / field_gemm_set_matrix / field_gemm_free on this ctx.
+const unsigned char* field_gemm_get_output_device(struct FieldGEMMContext* ctx) {
+    if (ctx == nullptr) return nullptr;
+    auto* impl = reinterpret_cast<FieldGEMMContextImpl*>(ctx);
+    return impl->d_O;
+}
+
 void field_gemm_free(struct FieldGEMMContext* ctx) {
     if (ctx == nullptr) return;
     auto* impl = reinterpret_cast<FieldGEMMContextImpl*>(ctx);

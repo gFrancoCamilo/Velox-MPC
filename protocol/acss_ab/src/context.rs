@@ -38,6 +38,10 @@ pub struct Context {
     /// Hardware acceleration context
     pub hash_context: HashState,
 
+    /// Cached GPU GEMM contexts + device buffers for the GPU dealer path.
+    #[cfg(feature = "gpu")]
+    pub gemm_cache: crate::protocol::AcssGemmCache,
+
     /// Cancel Handlers
     pub cancel_handlers: HashMap<u64, Vec<CancelHandler<Acknowledgement>>>,
     exit_rx: oneshot::Receiver<()>,
@@ -157,6 +161,8 @@ impl Context {
                 num_nodes: config.num_nodes,
                 sec_key_map: HashMap::default(),
                 hash_context: hashstate,
+                #[cfg(feature = "gpu")]
+                gemm_cache: crate::protocol::AcssGemmCache::new(),
                 myid: config.id,
                 
                 num_faults: config.num_faults,

@@ -49,6 +49,12 @@ extern "C" {
         batch: c_uint,
         o_bytes: *mut c_uchar,
     ) -> c_int;
+    fn field_gemm_compute_d2d(
+        ctx: *mut FieldGEMMContext,
+        d_s_bytes: *const c_uchar,
+        batch: c_uint,
+    ) -> c_int;
+    fn field_gemm_get_output_device(ctx: *mut FieldGEMMContext) -> *const c_uchar;
     fn field_gemm_free(ctx: *mut FieldGEMMContext);
 }
 
@@ -144,6 +150,32 @@ impl CudaFieldGEMM {
         }
         Ok(out)
     }
+
+    /// Run the GEMM with `d_s` already resident on the device; the result stays
+    /// in this context's device output buffer and its pointer is returned.
+    ///
+    /// The returned pointer is valid until the next `compute*`/`set_matrix`
+    /// call or drop **on this context** — chain GEMMs across *different*
+    /// contexts, never re-use one before its output is consumed.
+    ///
+    /// # Safety
+    /// `d_s` must be a valid CUDA device pointer to `batch * K * elem_size` bytes.
+    pub unsafe fn compute_d2d(&self, d_s: *const u8, batch: usize) -> Result<*const u8, String> {
+        let rc = field_gemm_compute_d2d(self.ctx, d_s, batch as c_uint);
+        if rc != 0 {
+            return Err(format!("field_gemm_compute_d2d failed (rc={})", rc));
+        }
+        let out = field_gemm_get_output_device(self.ctx);
+        if out.is_null() {
+            return Err("field_gemm_get_output_device returned NULL".to_string());
+        }
+        Ok(out)
+    }
+
+    /// Raw device pointer to the last GEMM output (see `compute_d2d` lifetime).
+    pub fn device_output_ptr(&self) -> *const u8 {
+        unsafe { field_gemm_get_output_device(self.ctx) }
+    }
 }
 
 impl Drop for CudaFieldGEMM {
@@ -155,17 +187,86 @@ impl Drop for CudaFieldGEMM {
     }
 }
 
+/// A GEMM context with its V matrix uploaded once and kept resident on device,
+/// for repeated `multiply_d2d` calls against the same matrix. This is the
+/// cache unit for the GPU ACSS dealer (mirrors async_mpc's `PreparedFieldGemm`).
+///
+/// Semantics match `gpu_matrix_matrix_multiply`: for a `matrix` of R rows × C
+/// cols, `multiply_d2d(d_s, batch)` computes `output[i][r] = Σ_l matrix[r][l]
+/// * S[i][l]` where `d_s` holds `batch` row-major vectors of length C, i.e.
+/// batch-stacked (matrix · vector_i). Output is (batch × R) row-major Fp4_61
+/// on device.
+pub struct PreparedFieldGemm {
+    gemm: CudaFieldGEMM,
+    /// Inner (contraction) dimension = the matrix's column count C.
+    pub k: usize,
+    /// Output dimension = the matrix's row count R.
+    pub n: usize,
+}
+
+impl PreparedFieldGemm {
+    /// Upload `matrix` (R × C, row-major) transposed into device memory.
+    pub fn new(matrix: &[Vec<LargeField>]) -> Result<Self, String> {
+        let r = matrix.len();
+        if r == 0 {
+            return Err("PreparedFieldGemm: empty matrix".to_string());
+        }
+        let c = matrix[0].len();
+        if matrix.iter().any(|row| row.len() != c) {
+            return Err("PreparedFieldGemm: ragged matrix".to_string());
+        }
+
+        let (field_id, elem_size) = resolve_field::<Mersenne61Degree4ExtensionField>();
+        // V[l, r] = matrix[r][l] so the kernel's O = S × V contracts over C.
+        let mut v_bytes = Vec::with_capacity(c * r * elem_size);
+        for l in 0..c {
+            for r_idx in 0..r {
+                write_elem_bytes(&matrix[r_idx][l], &mut v_bytes);
+            }
+        }
+
+        let mut gemm = CudaFieldGEMM::new(field_id, elem_size)?;
+        gemm.set_matrix(&v_bytes, c, r)?;
+        Ok(Self { gemm, k: c, n: r })
+    }
+
+    /// Device-to-device multiply; see `CudaFieldGEMM::compute_d2d` for the
+    /// output-pointer lifetime contract.
+    ///
+    /// # Safety
+    /// `d_s` must be a valid CUDA device pointer to `batch * k * 32` bytes.
+    pub unsafe fn multiply_d2d(&self, d_s: *const u8, batch: usize) -> Result<*const u8, String> {
+        self.gemm.compute_d2d(d_s, batch)
+    }
+
+    /// Host-to-host multiply against the resident matrix (upload S, download O).
+    pub fn multiply(&self, s_bytes: &[u8], batch: usize) -> Result<Vec<u8>, String> {
+        self.gemm.compute(s_bytes, batch)
+    }
+
+    pub fn device_output_ptr(&self) -> *const u8 {
+        self.gemm.device_output_ptr()
+    }
+}
+
+// SAFETY: the wrapped context pointer is only ever passed to CUDA runtime
+// calls; nothing is dereferenced on the host.
+unsafe impl Send for PreparedFieldGemm {}
+unsafe impl Sync for PreparedFieldGemm {}
+
 /// Serialise a `LargeField` (Fp4_61) into the 32-byte CUDA layout. Lambdaworks
 /// stores `FieldElement<Fp4_61>` as `[Fp2E; 2]` = `[[FpE; 2]; 2]` of plain u64s
 /// in their canonical representative — byte-identical to the CUDA `Fp4_61`
 /// struct, so a raw memcpy is correct.
-fn write_elem_bytes(elem: &LargeField, buf: &mut Vec<u8>) {
+pub fn write_elem_bytes(elem: &LargeField, buf: &mut Vec<u8>) {
     let ptr = elem as *const LargeField as *const u8;
     // SAFETY: LargeField is POD; size guarded by the LAYOUT_CHECK below.
     buf.extend_from_slice(unsafe { std::slice::from_raw_parts(ptr, 32) });
 }
 
-fn read_elem_bytes(bytes: &[u8]) -> LargeField {
+/// Inverse of `write_elem_bytes`: reinterpret 32 CUDA-layout bytes as a
+/// `LargeField`.
+pub fn read_elem_bytes(bytes: &[u8]) -> LargeField {
     debug_assert_eq!(bytes.len(), 32);
     unsafe {
         let mut elem = std::mem::MaybeUninit::<LargeField>::uninit();
