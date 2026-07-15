@@ -58,11 +58,18 @@ impl Agg {
     }
 }
 
+/// Preferred left-to-right column order for the per-instance pivot; any other
+/// labels are appended after these, alphabetically.
+const INSTANCE_COLS: &[&str] = &["ACSS_total", "ACSS_dealer_compute", "CTRBC", "AVID", "RA"];
+
 pub struct PhaseProfiler {
     enabled: bool,
     tag: String,
     spans_open: HashMap<(&'static str, u64), Instant>,
     agg: HashMap<&'static str, Agg>,
+    /// Per-instance aggregates: instance_id -> label -> agg. Lets the report
+    /// break each ACSS instance out instead of only showing the sum.
+    per_instance: HashMap<usize, HashMap<&'static str, Agg>>,
     marks: Vec<(&'static str, Instant)>,
     last_report: Option<Instant>,
 }
@@ -77,6 +84,7 @@ impl PhaseProfiler {
             tag: tag.into(),
             spans_open: HashMap::new(),
             agg: HashMap::new(),
+            per_instance: HashMap::new(),
             marks: Vec::new(),
             last_report: None,
         }
@@ -105,7 +113,14 @@ impl PhaseProfiler {
             return;
         }
         if let Some(t0) = self.spans_open.remove(&(label, key_of(instance_id, sub))) {
-            self.agg.entry(label).or_insert_with(Agg::new).add(t0.elapsed());
+            let d = t0.elapsed();
+            self.agg.entry(label).or_insert_with(Agg::new).add(d);
+            self.per_instance
+                .entry(instance_id)
+                .or_default()
+                .entry(label)
+                .or_insert_with(Agg::new)
+                .add(d);
         }
     }
 
@@ -175,6 +190,69 @@ impl PhaseProfiler {
             ));
         }
 
+        // Per-instance pivot: one row per ACSS instance id, so a slow instance
+        // (or a phase's whole id-range) stands out instead of being summed away.
+        if !self.per_instance.is_empty() {
+            // Column labels: the preferred ACSS lifecycle order, then any extras.
+            let mut cols: Vec<&'static str> = INSTANCE_COLS
+                .iter()
+                .copied()
+                .filter(|c| self.per_instance.values().any(|m| m.contains_key(c)))
+                .collect();
+            let mut extras: Vec<&'static str> = self
+                .per_instance
+                .values()
+                .flat_map(|m| m.keys().copied())
+                .filter(|l| !INSTANCE_COLS.contains(l))
+                .collect();
+            extras.sort_unstable();
+            extras.dedup();
+            cols.extend(extras);
+
+            // Sort instances by ACSS_total total desc (fallback: sum of all labels).
+            let sort_val = |m: &HashMap<&'static str, Agg>| -> Duration {
+                m.get("ACSS_total")
+                    .map(|a| a.total)
+                    .unwrap_or_else(|| m.values().map(|a| a.total).fold(Duration::ZERO, |x, y| x + y))
+            };
+            let mut insts: Vec<(usize, &HashMap<&'static str, Agg>)> =
+                self.per_instance.iter().map(|(k, v)| (*k, v)).collect();
+            insts.sort_by(|a, b| sort_val(b.1).cmp(&sort_val(a.1)).then(a.0.cmp(&b.0)));
+
+            let top_n = std::env::var("VELOX_PROFILE_TOPN")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|n| *n > 0)
+                .unwrap_or(64);
+            let total_insts = insts.len();
+            let shown = total_insts.min(top_n);
+
+            out.push_str(&format!(
+                "  -- per-instance spans (ms), {} instance(s){} --\n",
+                total_insts,
+                if shown < total_insts {
+                    format!(", showing slowest {} (VELOX_PROFILE_TOPN)", shown)
+                } else {
+                    String::new()
+                }
+            ));
+            out.push_str(&format!("  {:>10}", "instance"));
+            for c in &cols {
+                out.push_str(&format!(" {:>18}", c));
+            }
+            out.push('\n');
+            for (inst, m) in insts.into_iter().take(shown) {
+                out.push_str(&format!("  {:>10}", inst));
+                for c in &cols {
+                    match m.get(c) {
+                        Some(a) => out.push_str(&format!(" {:>18.1}", ms(a.total))),
+                        None => out.push_str(&format!(" {:>18}", "-")),
+                    }
+                }
+                out.push('\n');
+            }
+        }
+
         if self.marks.len() >= 2 {
             out.push_str("  -- phase timeline (wall-clock, non-overlapping) --\n");
             for w in self.marks.windows(2) {
@@ -220,6 +298,7 @@ mod tests {
             p.stop("CTRBC", 1, 0);
             p.mark("phase");
             assert!(p.agg.is_empty());
+            assert!(p.per_instance.is_empty());
             assert!(p.marks.is_empty());
         }
     }
@@ -239,12 +318,39 @@ mod tests {
     }
 
     #[test]
+    fn per_instance_breaks_out_each_instance() {
+        let mut p = enabled_profiler();
+        // Two ACSS instances, each with its own compute + a couple RA spans.
+        for inst in [0usize, 1] {
+            p.start("ACSS_total", inst, 9);
+            p.start("ACSS_dealer_compute", inst, 9);
+            std::thread::sleep(Duration::from_millis(1));
+            p.stop("ACSS_dealer_compute", inst, 9);
+            for sender in 0..2 {
+                p.start("RA", inst, sender);
+                p.stop("RA", inst, sender);
+            }
+            p.stop("ACSS_total", inst, 9);
+        }
+        // Global label aggregate still sums across instances.
+        assert_eq!(p.agg.get("RA").unwrap().count, 4);
+        // Per-instance view keeps them separate.
+        assert_eq!(p.per_instance.len(), 2);
+        assert_eq!(p.per_instance[&0].get("RA").unwrap().count, 2);
+        assert!(p.per_instance[&0].contains_key("ACSS_total"));
+        assert!(p.per_instance[&1].contains_key("ACSS_dealer_compute"));
+        // Pivot rendering must not panic.
+        p.report();
+    }
+
+    #[test]
     fn unclosed_and_mismatched_spans_are_ignored() {
         let mut p = enabled_profiler();
         p.start("RA", 7, 2);
         // stop with a different key -> no aggregation, open span stays.
         p.stop("RA", 7, 3);
         assert!(p.agg.get("RA").is_none());
+        assert!(p.per_instance.is_empty());
         assert_eq!(p.spans_open.len(), 1);
     }
 
