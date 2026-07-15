@@ -19,26 +19,37 @@ RAND_BATCHES_ARG=${4:+--rand-batches $4}
 #   trace   (default) low-overhead kernel timeline + geometry (safe whole-run)
 #   summary           per-kernel time summary (safe whole-run)
 #   metrics           achieved_occupancy + efficiency — REPLAYS kernels, which
-#                     distorts timing and will desync this node. Bounded by
-#                     PROFILE_TIMEOUT (default 90s): nvprof stops and flushes
-#                     the report after that, capturing the early ACSS kernels.
+#                     distorts timing and will desync this node.
 #   nvvp              trace to a .nvvp file for the Visual Profiler.
-# Output goes to logs/nvprof-<i>.log (or .nvvp). Occupancy is a property of
-# launch geometry + resource use, so metrics numbers match an isolated harness
-# at the same sizes — the live run just gives you the real sizes + idle gaps.
+#
+# IMPORTANT: nvprof only writes its report on a CLEAN app exit or its own
+# --timeout. A SIGKILL (kill -9) — including `lsof -ti:PORTS | xargs kill -9`,
+# which hits the node process nvprof is watching — is uncatchable, so nvprof
+# writes NOTHING ("Application received signal 9"). To avoid that, EVERY mode
+# below carries --timeout PROFILE_TIMEOUT (default 120s): nvprof stops itself
+# and flushes the report at the deadline, so your later kill -9 is harmless.
+# Counting starts at CUDA init (the first GPU op), which is the first ACSS
+# dealer — so the window covers the preprocessing kernel burst. Set
+# PROFILE_TIMEOUT long enough to reach it; if the run finishes cleanly first,
+# you get the full report anyway. (If you'd rather stop it by hand, send SIGINT
+# not SIGKILL: kill -INT <nvprof pid> — nvprof catches that and flushes.)
+# Occupancy is a property of launch geometry + resource use, so metrics numbers
+# match an isolated harness at the same sizes — the live run just gives you the
+# real sizes + idle gaps.
 PROFILE_NODE=${PROFILE_NODE:-}
 PROFILE_MODE=${PROFILE_MODE:-trace}
-PROFILE_TIMEOUT=${PROFILE_TIMEOUT:-90}
+PROFILE_TIMEOUT=${PROFILE_TIMEOUT:-120}
 
 prof_prefix() {
     local i="$1"
     [ -z "$PROFILE_NODE" ] && return 0
     [ "$i" != "$PROFILE_NODE" ] && return 0
+    local t="--timeout $PROFILE_TIMEOUT"
     case "$PROFILE_MODE" in
-        trace)   echo "nvprof --print-gpu-trace --log-file logs/nvprof-$i.log" ;;
-        summary) echo "nvprof --log-file logs/nvprof-$i.log" ;;
-        metrics) echo "nvprof --timeout $PROFILE_TIMEOUT --metrics achieved_occupancy,sm_efficiency,warp_execution_efficiency --log-file logs/nvprof-$i.log" ;;
-        nvvp)    echo "nvprof -o logs/nvprof-$i.nvvp" ;;
+        trace)   echo "nvprof $t --print-gpu-trace --log-file logs/nvprof-$i.log" ;;
+        summary) echo "nvprof $t --log-file logs/nvprof-$i.log" ;;
+        metrics) echo "nvprof $t --metrics achieved_occupancy,sm_efficiency,warp_execution_efficiency --log-file logs/nvprof-$i.log" ;;
+        nvvp)    echo "nvprof $t -o logs/nvprof-$i.nvvp" ;;
         *)       echo "" ;;
     esac
 }
