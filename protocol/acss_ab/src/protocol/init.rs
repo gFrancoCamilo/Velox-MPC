@@ -192,6 +192,13 @@ impl Context{
 
         let tot_sharings = secrets.len();
 
+        // Own-dealer spans: total ACSS latency and the local dealer-compute
+        // portion (interpolation/eval + commitments + serialization), keyed by
+        // (instance_id, myid). Closed in broadcast_dealer_artifacts and
+        // check_termination respectively.
+        self.profiler.start("ACSS_total", instance_id, self.myid);
+        self.profiler.start("ACSS_dealer_compute", instance_id, self.myid);
+
         #[cfg(feature = "gpu")]
         if !self.use_fft {
             return self.init_acss_ab_gpu(secrets, instance_id).await;
@@ -290,6 +297,11 @@ impl Context{
                 shares.push((rep, Some(shares_ser)));
             }
         }
+        // Dealer compute finished; the two dispersal building blocks begin.
+        self.profiler.stop("ACSS_dealer_compute", instance_id, self.myid);
+        self.profiler.start("CTRBC", instance_id, self.myid);
+        self.profiler.start("AVID", instance_id, self.myid);
+
         // Reliably broadcast this vector
         let _rbc_status = self.inp_ctrbc.send(ser_vec).await;
 
@@ -377,7 +389,8 @@ impl Context{
         // Reborrow share
         
         acss_ab_state.verification_status.insert(sender,true);
-        // Start reliable agreement
+        // Start reliable agreement (RA span closes in handle_ra_termination).
+        self.profiler.start("RA", instance_id, sender);
         let _status = self.inp_ra_channel.send((sender,1,instance_id)).await;
         self.check_termination(sender, instance_id).await;
     }

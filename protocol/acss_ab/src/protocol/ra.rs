@@ -8,6 +8,8 @@ use crate::{Context, protocol::ACSSABState};
 impl Context{
     pub async fn handle_ra_termination(&mut self, instance_id: usize, sender: usize, value: usize){
         log::info!("Received RA termination message from sender {} with value {}",sender, value);
+        // Close the RA span opened in verify_shares for this dealer.
+        self.profiler.stop("RA", instance_id, sender);
         if !self.acss_ab_state.contains_key(&instance_id) {
             let acss_state = ACSSABState::new();
             self.acss_ab_state.insert(instance_id, acss_state);
@@ -74,6 +76,24 @@ impl Context{
                 acss_state.clear_dealer_state(&sender);
             }
         }
+
+        // check_termination is the single choke point where a dealer finalizes
+        // (reached from the CTRBC, AVID, and RA handlers), so close the
+        // own-dealer ACSS_total span here. We early-returned above if this
+        // dealer was already done, so acss_status now containing `sender`
+        // means THIS call finalized it. The immutable re-borrow is fine now
+        // that the mutable borrow above has ended.
+        let own_done = sender == self.myid
+            && self
+                .acss_ab_state
+                .get(&instance_id)
+                .map_or(false, |s| s.acss_status.contains(&sender));
+        if own_done {
+            self.profiler.stop("ACSS_total", instance_id, self.myid);
+        }
+        // No end-of-protocol signal reaches this context, so emit the running
+        // table periodically; the last one logged is effectively final.
+        self.profiler.report_throttled();
     }
     // Invoke this function once you terminate the protocol
     // pub async fn terminate(&mut self, data: String) {

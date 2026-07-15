@@ -7,7 +7,11 @@ impl Context{
         log::info!("Received AVID termination message from sender {}",sender);
         if content.is_some(){
             let (instance_id,shares) : (usize,(Vec<LargeFieldSer>,LargeFieldSer,LargeFieldSer)) = bincode::deserialize(content.unwrap().as_slice()).unwrap();
-            
+            // Close the AVID span for our own dispersal (own dealing only).
+            if sender == self.myid {
+                self.profiler.stop("AVID", instance_id, self.myid);
+            }
+
             if !self.acss_ab_state.contains_key(&instance_id) {
                 let acss_state = ACSSABState::new();
                 self.acss_ab_state.insert(instance_id, acss_state);

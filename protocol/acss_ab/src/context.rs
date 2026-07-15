@@ -42,6 +42,9 @@ pub struct Context {
     #[cfg(feature = "gpu")]
     pub gemm_cache: crate::protocol::AcssGemmCache,
 
+    /// Per-building-block span profiler (enabled via VELOX_PROFILE env var).
+    pub profiler: protocol::PhaseProfiler,
+
     /// Cancel Handlers
     pub cancel_handlers: HashMap<u64, Vec<CancelHandler<Acknowledgement>>>,
     exit_rx: oneshot::Receiver<()>,
@@ -163,6 +166,7 @@ impl Context {
                 hash_context: hashstate,
                 #[cfg(feature = "gpu")]
                 gemm_cache: crate::protocol::AcssGemmCache::new(),
+                profiler: protocol::PhaseProfiler::new(format!("acss node {}", config.id)),
                 myid: config.id,
                 
                 num_faults: config.num_faults,

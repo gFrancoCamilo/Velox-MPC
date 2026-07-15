@@ -409,6 +409,7 @@ impl Context{
     }
     //Invoke this function once you terminate the protocol
     pub async fn terminate(&mut self, status: String, value: Vec<u8>) {
+        self.profiler.mark("output_done");
         let rbc_sync_msg = ProtSyncMsg{
             id: 1,
             status,

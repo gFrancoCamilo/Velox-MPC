@@ -6,6 +6,7 @@ use crate::{Context};
 impl Context{
     // This function will be used to run the online phase of the protocol
     pub async fn init_random_shared_bits_preparation(&mut self) {
+        self.profiler.mark("shared_bits");
         // Take two random sharings, and multiply them using a random double sharing
         let a_shares = self.rand_sharings_state.rand_sharings_inputs.0.clone().into_iter()
             .map(|x| vec![x]).collect();
@@ -19,7 +20,8 @@ impl Context{
     }
 
     pub async fn init_mixing(&mut self){
-        // First find input wires. 
+        self.profiler.mark("mixing");
+        // First find input wires.
         let mut input_sharings: Vec<LargeField> = self.mix_circuit_state.input_sharings.clone();
         if input_sharings.len() < self.k_value {
             log::error!("Not enough input sharings for mixing. Expected at least {}, got {}", self.k_value, input_sharings.len());

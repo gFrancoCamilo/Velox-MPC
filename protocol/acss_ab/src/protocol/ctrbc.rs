@@ -8,6 +8,10 @@ impl Context{
         log::info!("Received CTRBC termination message from sender {}",sender_rep);
         // Deserialize message
         let (instance_id, comm_dzk_vals): (usize, (Vec<[u8;32]>,Vec<[u8;32]>,Vec<LargeFieldSer>,usize)) = bincode::deserialize(content.as_slice()).unwrap();
+        // Close the CTRBC span for our own broadcast (own dealing only).
+        if sender_rep == self.myid {
+            self.profiler.stop("CTRBC", instance_id, self.myid);
+        }
         if !self.acss_ab_state.contains_key(&instance_id) {
             let acss_state = ACSSABState::new();
             self.acss_ab_state.insert(instance_id, acss_state);

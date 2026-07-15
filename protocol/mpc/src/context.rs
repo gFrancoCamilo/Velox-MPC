@@ -118,9 +118,12 @@ pub struct Context {
     pub output_mask_size: usize,
 
     pub preprocessing_mult_depth: usize,
-    pub delinearization_depth: usize, 
+    pub delinearization_depth: usize,
     pub compression_factor: usize,
     pub multiplication_switch_threshold: usize,
+
+    /// Top-level phase profiler (enabled via VELOX_PROFILE env var).
+    pub profiler: protocol::PhaseProfiler,
 }
 
 impl Context {
@@ -271,7 +274,8 @@ impl Context {
                 num_faults: config.num_faults,
                 cancel_handlers: HashMap::default(),
                 exit_rx: exit_rx,
-                
+                profiler: protocol::PhaseProfiler::new(format!("mpc node {}", config.id)),
+
                 threshold: 10000,
 
                 max_id: rbc_start_id,
@@ -540,6 +544,7 @@ impl Context {
                             // Start your protocol from here
                             // Write a function to broadcast a message. We demonstrate an example with a PING function
                             // Dealer sends message to everybody. <M, init>
+                            self.profiler.mark("rand_sharings");
                             self.init_rand_sh().await;
                         },
                         SyncState::STOP =>{
@@ -548,6 +553,8 @@ impl Context {
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap()
                                 .as_millis());
+                            self.profiler.mark("STOP");
+                            self.profiler.report();
                             log::info!("Termination signal received by the server. Exiting.");
                             break
                         },

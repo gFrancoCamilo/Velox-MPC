@@ -6,6 +6,7 @@ impl Context{
     // This function will be used to compress the multiplication tuples
     // It will take the shares of a, b, and the output and compress them into a single representation
     pub async fn delinearize_mult_tuples(&mut self){
+        self.profiler.mark("verification");
         // Here we will implement the logic for compressing the multiplication tuples
         // This might involve some form of serialization or aggregation of the shares
         // Initiate the random mask generation for the last level
