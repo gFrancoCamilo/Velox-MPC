@@ -18,9 +18,9 @@ impl Context{
         let depth_state = self.mult_state.get_single_depth_state(depth, false, n);
 
         // Log these entries in the verification state for later verification
-        if depth <= self.max_depth {
-            let first_a_shares = a_shares.clone().into_iter().map(|x| x[0].clone()).collect();
-            let first_b_shares = b_shares.clone().into_iter().map(|x| x[0].clone()).collect();
+        if self.verification_enabled && depth <= self.max_depth {
+            let first_a_shares = a_shares.iter().map(|x| x[0].clone()).collect();
+            let first_b_shares = b_shares.iter().map(|x| x[0].clone()).collect();
             self.verf_state.add_mult_inputs(depth, first_a_shares, first_b_shares);
         }
 

@@ -160,45 +160,16 @@ pub fn pseudorandom_lf(rng_seed: &[u8], num: usize) -> Vec<LargeField> {
     let mut rng = ChaCha20Rng::from_seed(do_hash(rng_seed));
     let mut random_numbers: Vec<LargeField> = Vec::with_capacity(num);
     for _ in 0..num {
-        // Fp4_61 element = 4 base-field (Mersenne-61) elements packed as two Fp2 components.
-        // Each base element accepts a u64; values ≥ p are folded via `from_u64`.
-        let c0 = lambdaworks_math::field::element::FieldElement::<
-            crate::mersenne_61::Mersenne61Field,
-        >::from(rng.next_u64());
-        let c1 = lambdaworks_math::field::element::FieldElement::<
-            crate::mersenne_61::Mersenne61Field,
-        >::from(rng.next_u64());
-        let c2 = lambdaworks_math::field::element::FieldElement::<
-            crate::mersenne_61::Mersenne61Field,
-        >::from(rng.next_u64());
-        let c3 = lambdaworks_math::field::element::FieldElement::<
-            crate::mersenne_61::Mersenne61Field,
-        >::from(rng.next_u64());
-        let lo = crate::mersenne_61::Fp2E::new([c0, c1]);
-        let hi = crate::mersenne_61::Fp2E::new([c2, c3]);
-        random_numbers.push(LargeField::new([lo, hi]));
+        // Mersenne-61 element = one u64 limb; values >= p are folded by `from_u64`.
+        random_numbers.push(LargeField::from(rng.next_u64()));
     }
     random_numbers
 }
 
 pub fn rand_field_element() -> LargeField {
-    // Sample 4 independent u64 limbs and fold each into the Mersenne-61 base field.
-    let r: [u64; 4] = random();
-    let c0 = lambdaworks_math::field::element::FieldElement::<
-        crate::mersenne_61::Mersenne61Field,
-    >::from(r[0]);
-    let c1 = lambdaworks_math::field::element::FieldElement::<
-        crate::mersenne_61::Mersenne61Field,
-    >::from(r[1]);
-    let c2 = lambdaworks_math::field::element::FieldElement::<
-        crate::mersenne_61::Mersenne61Field,
-    >::from(r[2]);
-    let c3 = lambdaworks_math::field::element::FieldElement::<
-        crate::mersenne_61::Mersenne61Field,
-    >::from(r[3]);
-    let lo = crate::mersenne_61::Fp2E::new([c0, c1]);
-    let hi = crate::mersenne_61::Fp2E::new([c2, c3]);
-    LargeField::new([lo, hi])
+    // Sample one u64 limb and fold it into the Mersenne-61 base field.
+    let r: u64 = random();
+    LargeField::from(r)
 }
 
 

@@ -1,7 +1,7 @@
 pub mod rand_sharings;
 pub use crate::protocol::rand_sharings::rand_state::RandSharings;
 
-pub mod online_phase;
+pub mod nn_inference;
 
 mod multiplication;
 pub use multiplication::MultState;

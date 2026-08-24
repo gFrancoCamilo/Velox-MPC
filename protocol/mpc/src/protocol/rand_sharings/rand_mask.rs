@@ -165,31 +165,36 @@ impl Context{
                 let masked_outputs = masked_outputs.unwrap();
                 let unmasked_outputs: Vec<LargeField> = masked_outputs.into_iter().zip(rand_recon_values.into_iter()).map(|(output,mask)| output-mask).collect();
                 
-                let mut outputs = Vec::new();
-                for out in unmasked_outputs{
-                    // Mirrors `input.rs::convert_string_to_large_field` (7 payload bytes
-                    // per 8-byte limb, byte 0 of each limb is the unused high-zero that
-                    // keeps the limb value below 2^56 so Mersenne-61 reduction stays a
-                    // no-op). Concatenate the four 7-byte payloads and strip the
-                    // left-side zero padding inserted at encode time.
-                    let reverse_conversion = |fe: &LargeField| -> String {
-                        let bytes = fe.to_bytes_be();
-                        let mut payload = Vec::with_capacity(28);
-                        for chunk in 0..4 {
-                            payload.extend_from_slice(&bytes[chunk * 8 + 1..chunk * 8 + 8]);
-                        }
-                        let first_nonzero = payload
-                            .iter()
-                            .position(|&b| b != 0)
-                            .unwrap_or(payload.len());
-                        payload[first_nonzero..]
-                            .iter()
-                            .map(|&b| b as char)
-                            .collect()
-                    };
-                    outputs.push(reverse_conversion(&out));
+                if crate::protocol::nn_inference::nn_reference::deterministic_mode() {
+                    let expected = crate::protocol::nn_inference::nn_reference::reference_output(
+                        self.nn_x, self.nn_y, self.nn_batch);
+                    if expected.len() != unmasked_outputs.len() {
+                        log::error!("NN CHECK FAILED: reconstructed {} wires, reference has {}",
+                            unmasked_outputs.len(), expected.len());
+                    } else if let Some((idx, got, want)) = expected.iter()
+                        .zip(unmasked_outputs.iter())
+                        .enumerate()
+                        .find(|(_, (w, g))| w != g)
+                        .map(|(i, (w, g))| (i, g.representative(), w.representative()))
+                    {
+                        log::error!("NN CHECK FAILED: output wire {} is {} but the plaintext \
+                                     forward pass gives {}", idx, got, want);
+                    } else {
+                        log::info!("NN CHECK PASSED: all {} output wires match the plaintext \
+                                    forward pass over the deterministic model", expected.len());
+                    }
                 }
-                println!("Broadcast output: {:?}", outputs);
+
+                // NN inference outputs are field elements, not the byte-packed text
+                // the anonymous-broadcast circuit produced. Emit their canonical
+                // u64 representatives.
+                let outputs: Vec<u64> = unmasked_outputs
+                    .iter()
+                    .map(|out| out.representative())
+                    .collect();
+                log::info!("Inference output ({} wires): {:?}",
+                    outputs.len(),
+                    &outputs[..outputs.len().min(16)]);
                 let ser_msg = bincode::serialize(&outputs).unwrap();
                 self.terminate("output".to_string(), ser_msg).await;
             }

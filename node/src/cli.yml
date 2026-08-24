@@ -31,7 +31,23 @@ args:
     - messages:
         short: t
         long: messages
-        help: Number of messages to broadcast anonymously
+        help: (legacy, unused by the NN-inference protocol)
+        takes_value: true
+    - nn_x:
+        long: nn_x
+        help: Neurons in each of the first three layers of the network
+        takes_value: true
+    - nn_y:
+        long: nn_y
+        help: Neurons in the final layer of the network (nn_y <= nn_x)
+        takes_value: true
+    - nn_batch:
+        long: nn_batch
+        help: Number of inference inputs evaluated in one forward pass
+        takes_value: true
+    - weight_chunk:
+        long: weight_chunk
+        help: Secrets per ACSS instance when splitting a party's weight block
         takes_value: true
     - comp:
         short: o

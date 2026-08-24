@@ -4,7 +4,7 @@ use crate::Context;
 use crypto::{hash::{do_hash, Hash}, aes_hash::MerkleTree};
 use lambdaworks_math::polynomial::Polynomial;
 use protocol::ByteConversion;
-use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element};
+use protocol::{LargeField, LargeFieldSer, generate_evaluation_points_fft, generate_evaluation_points, generate_evaluation_points_opt, sample_polynomials_from_prf, rand_field_element, field_bytes_to_hash_input, hash_to_field};
 
 use types::Replica;
 
@@ -168,8 +168,8 @@ impl Context{
         let mut blinding_commitments = Vec::new();
         for i in 0..self.num_nodes{
             blinding_commitments.push(self.hash_context.hash_two( 
-                blinding_poly_evaluations[i].clone().to_bytes_be().try_into().unwrap(), 
-                nonce_blinding_poly_evaluations[i].clone().to_bytes_be().try_into().unwrap()));
+                field_bytes_to_hash_input(&blinding_poly_evaluations[i].to_bytes_be()),
+                field_bytes_to_hash_input(&nonce_blinding_poly_evaluations[i].to_bytes_be())));
         }
 
         let blinding_mt_root = MerkleTree::new(blinding_commitments.clone(), &self.hash_context).root();
@@ -177,7 +177,7 @@ impl Context{
         
         let root_comm = self.hash_context.hash_two(share_root_comm, blinding_mt_root);
         // Convert root commitment to field element
-        let root_comm_fe = LargeField::from_bytes_be(&root_comm).unwrap();
+        let root_comm_fe = hash_to_field(&root_comm);
         log::info!("Root_comm_fe: {:?} for sender {} instance_id {}",root_comm_fe, self.myid, instance_id);
 
 
@@ -275,7 +275,7 @@ impl Context{
         let share_root = MerkleTree::new(share_commitments, &self.hash_context).root();
         let blinding_root = MerkleTree::new(blinding_commitments, &self.hash_context).root();
         let root_comm = self.hash_context.hash_two(share_root, blinding_root);
-        let root_comm_fe = LargeField::from_bytes_be(&root_comm).unwrap();
+        let root_comm_fe = hash_to_field(&root_comm);
 
         log::info!("Root_comm_fe: {:?} for sender {} instance_id {}",root_comm_fe, sender, instance_id);
         let verf_status = self.evaluate_dzk_poly(
@@ -331,8 +331,8 @@ impl Context{
 
         let blinding_poly_share_bytes = dzk_point.sub(agg_shares_point).to_bytes_be();
         let blinding_hash = self.hash_context.hash_two(
-            blinding_poly_share_bytes.try_into().unwrap(),
-            blinding_nonce.try_into().unwrap()
+            field_bytes_to_hash_input(&blinding_poly_share_bytes),
+            field_bytes_to_hash_input(&blinding_nonce)
         );
         if blinding_hash != blinding_comm{
             log::info!("Blinding hash: {:?}, blinding_comm: {:?}", blinding_hash, blinding_comm);

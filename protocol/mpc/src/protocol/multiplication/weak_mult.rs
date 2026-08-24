@@ -54,54 +54,50 @@ impl Context{
         else{
             return;
         }
-        let reconstructed_blinded_secrets;
-        if mult_state.two_levels {
-            reconstructed_blinded_secrets = mult_state.l2_shares_reconstructed.clone();
-        }
-        else{
-            // Quadratic multiplication layer
-            reconstructed_blinded_secrets = mult_state.l1_shares_reconstructed.clone();
-        }
-        
-        // Get the random sharings
-        // Subtract random sharings
-        log::info!("Subtracting random sharings with length {} from reconstructed secrets {} at depth {}",mult_state.util_rand_sharings.len(), reconstructed_blinded_secrets.len(), depth);
+        // `l1/l2_shares_reconstructed` and `util_rand_sharings` are both one element
+        // per inner product at this depth — millions at NN scale. Check the lengths
+        // first, then move both out rather than cloning them.
+        let recon_len = if mult_state.two_levels {
+            mult_state.l2_shares_reconstructed.len()
+        } else {
+            mult_state.l1_shares_reconstructed.len()
+        };
 
-        // Weird bugs occurring in this phase. 
-        if mult_state.util_rand_sharings.len() == reconstructed_blinded_secrets.len() && reconstructed_blinded_secrets.len() > 0{
+        log::info!("Subtracting random sharings with length {} from reconstructed secrets {} at depth {}",mult_state.util_rand_sharings.len(), recon_len, depth);
+
+        if mult_state.util_rand_sharings.len() == recon_len && recon_len > 0{
             log::info!("Moving on to depth {}", depth + 1);
-            // Par iter from rayon not needed here because we are not doing heavy computation
-            let mut shares_next_depth: Vec<LargeField> 
-                    = mult_state.util_rand_sharings.clone().into_iter()
+            let reconstructed_blinded_secrets = if mult_state.two_levels {
+                std::mem::take(&mut mult_state.l2_shares_reconstructed)
+            } else {
+                // Quadratic multiplication layer
+                std::mem::take(&mut mult_state.l1_shares_reconstructed)
+            };
+            let util_rand_sharings = std::mem::take(&mut mult_state.util_rand_sharings);
+
+            let mut shares_next_depth: Vec<LargeField>
+                    = util_rand_sharings.into_iter()
                         .zip(reconstructed_blinded_secrets.into_iter())
                             .map(|(sharing, recon_secret)|recon_secret-sharing)
                                 .collect();
-            
+
             // Trim the last k shares for padding
             for _i in 0..mult_state.padding_shares{
                 shares_next_depth.pop();
             }
             log::info!("Shares for next depth: {}", shares_next_depth.len());
-            self.verf_state.add_mult_output_shares(depth, shares_next_depth.clone()); // Store the shares for the next depth
-            // self.choose_multiplication_protocol(a_shares, b_shares, depth)
-            // How to handle next depth wires?
+            if self.verification_enabled {
+                self.verf_state.add_mult_output_shares(depth, shares_next_depth.clone());
+            }
             mult_state.depth_terminated = true;
-            if depth == self.preprocessing_mult_depth{
-                // Random bit sharings, add them to mix_circuit state
-                log::info!("Multiplication complete for rand_bit preparation with shares_len: {:?}", shares_next_depth.len());
-                self.mix_circuit_state.rand_bit_recon_shares.insert(self.myid, shares_next_depth);
-                self.init_rand_bit_reconstruction().await;
+            if depth <= self.max_depth{
+                // A weight-combination stage of the network.
+                log::info!("Terminated DN reduction at NN stage {}", depth);
+                Box::pin(self.verify_nn_layer_termination(depth, shares_next_depth)).await;
             }
-            else if depth <= self.max_depth{
-                // Start the next depth multiplication here
-                log::info!("Terminated multiplication at mixing depth {}, initializing next mixing level", depth);
-                self.mix_circuit_state.mult_result.insert(depth, shares_next_depth.clone());
-                self.verify_mixing_level_termination(depth).await;
-            }
-            else if depth > self.max_depth{
-                // Temporary
+            else{
+                // Tuple-verification compression levels live above max_depth.
                 self.verify_ex_mult_termination_verification(depth, shares_next_depth).await;
-                //self.handle_mult_term_tmp(shares_next_depth).await;
             }
         }
         else{

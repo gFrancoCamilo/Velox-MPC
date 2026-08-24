@@ -10,27 +10,17 @@ impl Context{
     pub async fn init_rand_sh(&mut self){
         let num_batches = self.tot_batches;
         let batch_size = self.total_sharings;
-        
-        // Start ACSS with abort and 2t-sharing simultaneously for each batch
-        // Input sharings - Needed for generating t-sharings of +1/-1 for mixing circuit. 
-        let mut deg_t_batches = Vec::new();
-        let batches_inputs: Vec<Vec<LargeFieldSer>> = (0..num_batches).into_par_iter().map(|_| {
-            let rand_values: Vec<LargeFieldSer> = (0..batch_size).into_par_iter().map(|_| rand_field_element().to_bytes_be()).collect();
-            return rand_values;
-        }).collect();
-        // Doubly share same inputs
-        deg_t_batches.extend(batches_inputs.clone());
-        //deg_t_batches.extend(batches_inputs);
 
-        let batches_mult: Vec<Vec<LargeFieldSer>> = (0..2*num_batches).into_par_iter().map(|_| {
-            let rand_values: Vec<LargeFieldSer> = (0..batch_size).into_par_iter().map(|_| rand_field_element().to_bytes_be()).collect();
-            return rand_values;
-        }).collect();
-
-        deg_t_batches.extend(batches_mult.clone());
-
-        for (index,batch) in deg_t_batches.into_iter().enumerate(){
-            // Create random values
+        // Three degree-t batches, all feeding the multiplication randomness pool.
+        // (Batch 0 previously fed the mixing circuit's random-bit preparation,
+        // which the NN has no use for.) Each batch is built and shipped one at a
+        // time: holding all three at once doubles the preprocessing footprint for
+        // no reason.
+        for index in 0..3*num_batches{
+            let batch: Vec<LargeFieldSer> = (0..batch_size)
+                .into_par_iter()
+                .map(|_| rand_field_element().to_bytes_be())
+                .collect();
             log::info!("Initiating secret sharing in preprocessing phase for batch {}", index);
             let status = self.acss_ab_send.send((index,batch)).await;
             if status.is_err(){
@@ -38,28 +28,11 @@ impl Context{
             }
         }
 
-        // Initiate input sharing module as well
-        // Share inputs as well using ACSS-Abort. 
-        let inputs_ser = self.inputs.clone().into_iter().map(|x| x.to_bytes_be()).collect();
-
-        log::info!("Initiating input sharing in preprocessing phase for input: {:?}", inputs_ser);
-        let status = self.acss_ab_send.send((self.input_acss_id_offset, inputs_ser)).await;
-        if status.is_err(){
-            log::error!("Failed to send input value to ACSS protocol because of error: {:?}", status.err().unwrap());
-        }
-        // let inputs_ser = self.inputs.iter().map(|x| x.to_bytes_be()).collect();
-        // let status = self.acss_ab_send.send((self.input_acss_id_offset, inputs_ser)).await;
-        // if status.is_err(){
-        //     log::error!("Failed to send input value to ACSS protocol because of error: {:?}", status.err().unwrap());
-        // }
-
-        let zeros: Vec<Vec<LargeFieldSer>> = (0..3*num_batches).into_par_iter().map(|_| {
-            let rand_values: Vec<LargeFieldSer> = (0..batch_size).into_par_iter().map(|_| LargeField::zero().to_bytes_be()).collect();
-            return rand_values;
-        }).collect();
-
-        for (index, batch) in zeros.into_iter().enumerate(){
-            // Create random values
+        for index in 0..3*num_batches{
+            let batch: Vec<LargeFieldSer> = (0..batch_size)
+                .into_par_iter()
+                .map(|_| LargeField::zero().to_bytes_be())
+                .collect();
             log::info!("Initiating 2t sharing in preprocessing phase for batch {}", index);
             let status = self.sh2t_send.send((index,batch)).await;
             if status.is_err(){
@@ -68,10 +41,10 @@ impl Context{
         }
 
         // Random masks for output wires
-        let mut random_masks = Vec::new();
-        for _ in 0..self.output_mask_size{
-            random_masks.push(rand_field_element().to_bytes_be());
-        }
+        let random_masks: Vec<LargeFieldSer> = (0..self.output_mask_size)
+            .into_par_iter()
+            .map(|_| rand_field_element().to_bytes_be())
+            .collect();
         let avss_status = self.avss_send.send((true, Some(random_masks), None)).await;
         if avss_status.is_err(){
             log::error!("Failed to send random values to AVSS protocol {:?}", avss_status.err().unwrap());
@@ -134,22 +107,17 @@ impl Context{
             log::debug!("ACSS, Sh2t, and AVSS not completed for sender {} for all batches", sender);
             return;
         }
-        if !self.mix_circuit_state.input_acss_shares.contains_key(&sender){
-            return;
-        }
         if self.rand_sharings_state.acss_completed_parties.contains(&sender){
             log::debug!("ACSS, Sh2t, and AVSS already completed for sender {} for all batches", sender);
             return;
         }
         let shares_batches_map = self.rand_sharings_state.shares.get_mut(&sender).unwrap();
         let share_2t_batches_map = self.rand_sharings_state.sh2t_shares.get_mut(&sender).unwrap();
-        let input_sharings = self.mix_circuit_state.input_acss_shares.get_mut(&sender).unwrap();
-        if shares_batches_map.len() == (3*self.tot_batches) && 
-            share_2t_batches_map.len() == 3*self.tot_batches && 
-            input_sharings.len() == 1 &&
+        if shares_batches_map.len() == (3*self.tot_batches) &&
+            share_2t_batches_map.len() == 3*self.tot_batches &&
             self.output_mask_state.avss_shares.contains_key(&sender){
             // ACSS is complete. Wait for sh2t sharings now
-            log::info!("ACSS, ACSS Input, Sh2t, and AVSS completed for sender {} for all batches", sender);
+            log::info!("ACSS, Sh2t, and AVSS completed for sender {} for all batches", sender);
             log::info!("Batches info: {:?} {:?}", shares_batches_map.keys(),share_2t_batches_map.keys());
             self.rand_sharings_state.acss_completed_parties.insert(sender);
 
@@ -188,64 +156,47 @@ impl Context{
                 
                 let x_values: Vec<LargeField> = (2..self.num_faults+3).into_iter().map(|x| LargeField::from(x as u64)).collect();
                 let vandermonde_matrix = Self::vandermonde_matrix(x_values, 2*self.num_faults+1);
-                
-                // Build party-accumulated share vectors
-                let acs_indexed_group_batch_1 = self.gen_random_sharings(0);
-                let acs_indexed_group_batch_2 = self.gen_random_sharings(self.tot_batches);
-                let acs_indexed_group_batch_3 = self.gen_random_sharings(2*self.tot_batches);
-                
-                let acs_indexed_2t_share_groups = self.gen_2t_sharings();
 
-                // Multiply each vector with the indexed vector in the Vandermonde matrix
-                let rand_sharings_mult_b1: Vec<LargeField> = acs_indexed_group_batch_1.into_par_iter().map(|x| {
-                    let res = Self::matrix_vector_multiply(&vandermonde_matrix, &x);
-                    res
-                }).flatten().collect();
-                
-                let mut rand_sharings_mult: Vec<LargeField> = acs_indexed_group_batch_2.into_par_iter().map(|x| {
-                    let res = Self::matrix_vector_multiply(&vandermonde_matrix, &x);
-                    res
-                }).flatten().collect();
-                let rand_sharings_mult_b4: Vec<LargeField> = acs_indexed_group_batch_3.into_par_iter().map(|x| {
-                    let res = Self::matrix_vector_multiply(&vandermonde_matrix, &x);
-                    res
-                }).flatten().collect();
-                rand_sharings_mult.extend(rand_sharings_mult_b4);
-
-
-                let rand_sharings_2t_mult: Vec<LargeField> = acs_indexed_2t_share_groups.into_par_iter().map(|x| {
-                    let res = Self::matrix_vector_multiply(&vandermonde_matrix, &x);
-                    res
-                }).flatten().collect();
-
-                log::info!("Completed preprocessing and generated {} random sharings and {} random 2t sharings", 
-                        rand_sharings_mult_b1.len()*3, rand_sharings_2t_mult.len());
-                
-                self.rand_sharings_state.rand_sharings_inputs = (rand_sharings_mult_b1.clone(), rand_sharings_mult_b1.clone());
-                self.mix_circuit_state.rand_bit_inp_shares.extend(rand_sharings_mult_b1);
-                
-                // Prepare input sharings
-                let input_sharings = self.gen_input_sharings();
-                if input_sharings.is_none(){
-                    log::error!("Input sharings are None, cannot proceed with random sharings generation");
-                    return;
+                // Extract each degree-t batch and fold it into the pool one at a
+                // time, dropping the intermediate group vectors between batches.
+                let mut total_extracted = 0usize;
+                for batch_index in 0..3{
+                    let groups = self.gen_random_sharings(batch_index*self.tot_batches);
+                    let extracted: Vec<LargeField> = groups.into_par_iter().map(|x| {
+                        Self::matrix_vector_multiply(&vandermonde_matrix, &x)
+                    }).flatten().collect();
+                    total_extracted += extracted.len();
+                    self.rand_sharings_state.rand_sharings_mult.extend(extracted);
                 }
-                self.mix_circuit_state.input_sharings.extend(input_sharings.unwrap());
 
-                // Allocate 2n sharings to common coins
-                let rand_sharings_coin =  rand_sharings_mult.split_off(rand_sharings_mult.len()- self.total_sharings_for_coins);
-                
-                // Add sharings and coins to state
-                self.rand_sharings_state.rand_sharings_mult.extend(rand_sharings_mult);
+                let acs_indexed_2t_share_groups = self.gen_2t_sharings();
+                let rand_sharings_2t_mult: Vec<LargeField> = acs_indexed_2t_share_groups.into_par_iter().map(|x| {
+                    Self::matrix_vector_multiply(&vandermonde_matrix, &x)
+                }).flatten().collect();
+
+                log::info!("Completed preprocessing and generated {} random sharings and {} random 2t sharings",
+                        total_extracted, rand_sharings_2t_mult.len());
+
+                // Set aside sharings for the verification phase's common coins.
+                let coin_count = self.total_sharings_for_coins.min(self.rand_sharings_state.rand_sharings_mult.len());
+                let rand_sharings_coin: Vec<LargeField> = self.rand_sharings_state.rand_sharings_mult
+                    .drain(self.rand_sharings_state.rand_sharings_mult.len()-coin_count..)
+                    .collect();
                 self.rand_sharings_state.rand_sharings_coin.extend(rand_sharings_coin);
-                self.rand_sharings_state.rand_2t_sharings_mult.extend(rand_sharings_2t_mult);    
-                
-                // Clear acss sharings now
+                self.rand_sharings_state.rand_2t_sharings_mult.extend(rand_sharings_2t_mult);
+
+                // Release the raw ACSS/Sh2t shares — they are the single largest
+                // preprocessing allocation and are dead once extraction is done.
                 self.rand_sharings_state.shares.clear();
+                self.rand_sharings_state.shares.shrink_to_fit();
                 self.rand_sharings_state.sh2t_shares.clear();
+                self.rand_sharings_state.sh2t_shares.shrink_to_fit();
 
                 self.generate_random_mask_shares(self.rand_sharings_state.acs_output.clone(),vandermonde_matrix).await;
-                self.init_random_shared_bits_preparation().await;
+                self.terminate("Preprocessing".to_string(), vec![]).await;
+                // Weights and input activations are shared in the input phase,
+                // which gates the online phase on *all* n dealers.
+                self.init_input_phase().await;
             }
         }
     }
@@ -266,8 +217,8 @@ impl Context{
     }
 
     pub fn matrix_vector_multiply(
-        matrix: &Vec<Vec<LargeField>>,
-        vector: &Vec<LargeField>,
+        matrix: &[Vec<LargeField>],
+        vector: &[LargeField],
     ) -> Vec<LargeField> {
         matrix
             .iter()
@@ -307,25 +258,6 @@ impl Context{
         acs_indexed_share_groups
     }
 
-    pub fn gen_input_sharings(&self)-> Option<Vec<LargeField>>{
-        let mut input_sharings = Vec::new();
-        for party in 0..self.num_nodes{
-            if self.rand_sharings_state.acs_output.contains(&party){
-                // First sharing
-                let shares = self.mix_circuit_state.input_acss_shares.get(&party).unwrap();
-                if !shares.contains_key(&0){
-                    log::error!("Input index {} not found for sender {}, ACSS of input did not terminate", 0, party);
-                    return None;
-                }
-                else{
-                    let shares_batch = shares.get(&0).unwrap().clone();
-                    input_sharings.extend(shares_batch);
-                }     
-            }
-        }
-        Some(input_sharings)
-    }
-
     pub fn gen_2t_sharings(&self) -> Vec<Vec<LargeField>>{
         let mut acs_indexed_2t_share_groups: Vec<Vec<LargeField>> = Vec::new();
         (0..3*self.tot_batches*self.total_sharings).into_iter().for_each(|_|{
@@ -336,7 +268,12 @@ impl Context{
                 // Sh2t sharing
                 let shares_2t = self.rand_sharings_state.sh2t_shares.get(&party).unwrap();
                 let mut index = 0;
-                for batch in 0..self.tot_batches{
+                // All 3*tot_batches Sh2t batches are consumed. The previous bound
+                // of `tot_batches` left two thirds of the groups empty, and an
+                // empty group folds to *exactly zero* through the Vandermonde
+                // multiply below — producing degree-2t "masks" of zero, which
+                // mask nothing in the DN reduction.
+                for batch in 0..3*self.tot_batches{
                     if !shares_2t.contains_key(&batch){
                         log::error!("Batch {} not found in shares_batch for 2t shares", batch);
                     }

@@ -7,124 +7,158 @@ use crypto::hash::do_hash;
 use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
 use protocol::{LargeField, LargeFieldSer, vandermonde_matrix, inverse_vandermonde, matrix_vector_multiply, matrix_matrix_multiply, powers_matrix};
-use rayon::prelude::{ ParallelIterator, IntoParallelRefIterator};
+use rayon::prelude::{ParallelIterator, IndexedParallelIterator, IntoParallelRefIterator};
 use types::{Replica, WrapperMsg};
 
 use crate::{msg::ProtMsg};
 
 impl Context{
-    pub async fn init_linear_multiplication_prot(&mut self, mut a_vec_shares: Vec<Vec<LargeField>>, mut b_vec_shares: Vec<Vec<LargeField>>, depth: usize) {
-        // Pad shares until they become a multiple of 2t+1
-        // Share inputs for later verification
-        if depth <= self.max_depth {
-            let first_a_shares: Vec<LargeField> = a_vec_shares.clone().into_iter().map(|x| x[0].clone()).collect();
-            let first_b_shares: Vec<LargeField> = b_vec_shares.clone().into_iter().map(|x| x[0].clone()).collect();
+    /// Generic entry point: one DN inner product per `(a_vec_shares[g], b_vec_shares[g])`
+    /// pair. Used by the tuple-verification path, where the operand pairs are
+    /// unrelated to each other.
+    pub async fn init_linear_multiplication_prot(&mut self, a_vec_shares: Vec<Vec<LargeField>>, b_vec_shares: Vec<Vec<LargeField>>, depth: usize) {
+        // Recording every component of every gate is what makes the verification
+        // state proportional to the total scalar-product count rather than the
+        // gate count; at NN-inference scale that is ~10^10 elements, so it stays
+        // off until the rolling/streaming verification lands.
+        if self.verification_enabled && depth <= self.max_depth {
+            let first_a_shares: Vec<LargeField> = a_vec_shares.iter().map(|x| x[0].clone()).collect();
+            let first_b_shares: Vec<LargeField> = b_vec_shares.iter().map(|x| x[0].clone()).collect();
             log::info!("Adding shares to verification state with a:{} b:{} at depth {}", first_a_shares.len(), first_b_shares.len(), depth);
             self.verf_state.add_mult_inputs(depth, first_a_shares, first_b_shares);
         }
-        
+
+        let products: Vec<LargeField> = a_vec_shares
+            .par_iter()
+            .zip_eq(b_vec_shares.par_iter())
+            .map(|(a, b)| Self::dot_product(a, b))
+            .collect();
+        drop(a_vec_shares);
+        drop(b_vec_shares);
+        Box::pin(self.run_dn_inner_products(products, depth)).await;
+    }
+
+    /// Dense-layer entry point: every activation vector is dotted against every
+    /// weight column, so the whole stage's `b * d_out` products are one GEMM
+    /// rather than `b * d_out` separate dot-product calls.
+    ///
+    /// This also avoids materialising the tiled left operand. Feeding the generic
+    /// path would require `b * d_out` copies of the activation vector — at
+    /// `b=256, x=4096` that is 4.3e9 field elements, ~34 GB. Here the memory is
+    /// just the two operands.
+    ///
+    /// Output order is example-major: `products[i * d_out + j] = <x_i, W[:,j]>`.
+    pub async fn init_layer_multiplication(
+        &mut self,
+        activations: Vec<Vec<LargeField>>,
+        weight_cols: Vec<Vec<LargeField>>,
+        depth: usize,
+    ) {
+        let d_out = weight_cols.len();
+        let batch = activations.len();
+
+        // row_major = true → evals[j][i] = <weight_cols[j], activations[i]>.
+        let evals = matrix_matrix_multiply(&weight_cols, &activations, true);
+        drop(weight_cols);
+        drop(activations);
+
+        let mut products = Vec::with_capacity(batch * d_out);
+        for i in 0..batch {
+            for j in 0..d_out {
+                products.push(evals[j][i].clone());
+            }
+        }
+        drop(evals);
+        Box::pin(self.run_dn_inner_products(products, depth)).await;
+    }
+
+    /// The DN reduction proper. Takes the *unmasked* inner-product results
+    /// `products[g] = <a_g, b_g>`, masks each with a fresh degree-`t` sharing,
+    /// packs groups of `2t+1` into a degree-`2t` polynomial masked by a degree-`2t`
+    /// sharing of zero, and ships one evaluation per party.
+    pub async fn run_dn_inner_products(&mut self, mut products: Vec<LargeField>, depth: usize) {
         let multiple_of_val = 2*self.num_faults+1;
-        let mut padding_length = multiple_of_val - (a_vec_shares.len()%multiple_of_val);
-        if (a_vec_shares.len()%multiple_of_val) == 0{
+        let mut padding_length = multiple_of_val - (products.len()%multiple_of_val);
+        if (products.len()%multiple_of_val) == 0{
             padding_length =0;
         }
-        // Pad the shares until it becomes a multiple of 2t+1
+        // Pad with zero products until the count is a multiple of 2t+1.
         for _ in 0..padding_length{
-            a_vec_shares.push(vec![LargeField::zero()]);
-            b_vec_shares.push(vec![LargeField::zero()]);
+            products.push(LargeField::zero());
         }
-        if a_vec_shares.len()%multiple_of_val != 0{
-            
-        }
-        let tot_groups = a_vec_shares.len() / (2 * self.num_faults + 1);
-        // Use linear multiplication protocol here
-        let tot_shares = a_vec_shares.len();
+        let tot_groups = products.len() / (2 * self.num_faults + 1);
+        let tot_shares = products.len();
         
-        let depth_state;
-        if !self.mult_state.depth_share_map.contains_key(&depth){
-            depth_state = self.mult_state.get_single_depth_state(depth, true, tot_groups);
-        }
-        else{
-            depth_state = self.mult_state.depth_share_map.get_mut(&depth).unwrap();
-        }
-
-        depth_state.padding_shares = padding_length;
-
-        // Get random sharings
-        let mut r_sharings = Vec::with_capacity(tot_shares);
-        for _ in 0..tot_shares {
-            // Check if there are enough random shares
-            if self.rand_sharings_state.rand_sharings_mult.len() > 0 {
-                
-                let rand_sharing = self.rand_sharings_state.rand_sharings_mult.pop_front().unwrap();
-                r_sharings.push(rand_sharing.clone());
-                depth_state.util_rand_sharings.push(rand_sharing);
-            
-            } else {
-                log::error!("Not enough random shares for linear multiplication protocol");
-                return;
+        {
+            let depth_state;
+            if !self.mult_state.depth_share_map.contains_key(&depth){
+                depth_state = self.mult_state.get_single_depth_state(depth, true, tot_groups);
             }
-        }
-
-        let mut o_sharings = Vec::with_capacity(tot_shares/2);
-        for _ in 0..(tot_groups*(self.num_faults+1)) {
-            // Check if there are enough random shares for zero multiplication
-            if self.rand_sharings_state.rand_2t_sharings_mult.len() > 0 {
-                o_sharings.push(self.rand_sharings_state.rand_2t_sharings_mult.pop_front().unwrap());
-            } else {
-                log::error!("Not enough random shares for zero multiplication protocol");
-                return;
+            else{
+                depth_state = self.mult_state.depth_share_map.get_mut(&depth).unwrap();
             }
+            depth_state.padding_shares = padding_length;
         }
-            
-        // Group inputs
-        // let a_vec_shares_grouped = Self::group_elements_by_count(a_vec_shares.clone(), tot_shares / (2 * self.num_faults + 1));
-        // let b_vec_shares_grouped = Self::group_elements_by_count(b_vec_shares.clone(), tot_shares / (2 * self.num_faults + 1));
-        // let r_shares_grouped = Self::group_elements_by_count(r_sharings.clone(), tot_shares / (2 * self.num_faults + 1));
-        // let o_shares_grouped = Self::group_elements_by_count(o_sharings.clone(), tot_shares / (2 * self.num_faults + 1));
-        
-        let a_vec_shares_grouped;
-        let b_vec_shares_grouped;
-        let r_shares_grouped;
-        let o_shares_grouped;
-        if a_vec_shares.len()< 2*self.num_faults+1{
-            a_vec_shares_grouped = vec![a_vec_shares];
-            b_vec_shares_grouped = vec![b_vec_shares];
-            r_shares_grouped = vec![r_sharings];
-            o_shares_grouped = vec![o_sharings];
-        }
-        else{
-            a_vec_shares_grouped = a_vec_shares.chunks(2*self.num_faults+1).map(|x|x.to_vec()).collect();
-            b_vec_shares_grouped = b_vec_shares.chunks(2*self.num_faults+1).map(|x|x.to_vec()).collect();
-            r_shares_grouped = r_sharings.chunks(2*self.num_faults+1).map(|x|x.to_vec()).collect();
-            o_shares_grouped = o_sharings.chunks(self.num_faults+1).map(|x|x.to_vec()).collect();
-        }
-        
-        let total_chunks = a_vec_shares_grouped.len();
 
-        // Check that there are the correct number of groups
+        // Drain the degree-t masks as one block. The old form pushed each mask into
+        // both a local vector and the depth state, keeping two full copies alive for
+        // the whole call; here the block is *moved* into the depth state once the
+        // z-vectors have been built off it.
+        if self.rand_sharings_state.rand_sharings_mult.len() < tot_shares {
+            log::error!("Not enough random shares for linear multiplication: have {}, need {}",
+                self.rand_sharings_state.rand_sharings_mult.len(), tot_shares);
+            return;
+        }
+        let r_sharings: Vec<LargeField> = self.rand_sharings_state.rand_sharings_mult.drain(..tot_shares).collect();
+
+        // One degree-2t zero sharing per (t+1) of each (2t+1)-sized group.
+        let o_count = tot_groups * (self.num_faults + 1);
+        if self.rand_sharings_state.rand_2t_sharings_mult.len() < o_count {
+            log::error!("Not enough 2t sharings for linear multiplication: have {}, need {}",
+                self.rand_sharings_state.rand_2t_sharings_mult.len(), o_count);
+            return;
+        }
+        let o_sharings: Vec<LargeField> = self.rand_sharings_state.rand_2t_sharings_mult.drain(..o_count).collect();
+
+        let total_chunks = tot_groups;
 
         let vandermonde_points: Vec<LargeField> = (2..self.num_nodes+2).into_iter().map(|x| LargeField::from(x as u64)).collect();
-        let vdm_matrix = Self::vandermonde_matrix(vandermonde_points, self.num_faults); // TODO: can initialize the vdm_matrix somewhere outside to not compute it each time this gets called
+        let vdm_matrix = Self::vandermonde_matrix(vandermonde_points, self.num_faults);
 
         // Build every chunk's z_vector and o_vec first, then do ONE GEMM across all
-        // chunks to evaluate them at the n party points. Per-chunk GEMM lost ~6× to
+        // chunks to evaluate them at the n party points. Per-chunk GEMM lost ~6x to
         // the scalar loop because each call paid Rayon setup overhead for a tiny
-        // 16×11 product; bench `BatchedPartyEval` characterizes the right shape.
-        let z_vector_len = 2 * self.num_faults + 1;
+        // 16x11 product; bench `BatchedPartyEval` characterizes the right shape.
+        let z_vector_len = multiple_of_val;
+        let o_group_len = self.num_faults + 1;
         let party_powers = powers_matrix(&self.roots_of_unity, z_vector_len);
 
+        // Chunks are read as slices of the flat vectors — the previous grouped
+        // `chunks(..).map(to_vec)` copies duplicated every operand.
         let mut z_vectors: Vec<Vec<LargeField>> = Vec::with_capacity(total_chunks);
         let mut o_vecs: Vec<Vec<LargeField>> = Vec::with_capacity(total_chunks);
         for i in 0..total_chunks {
-            o_vecs.push(Self::matrix_vector_multiply(&vdm_matrix, &o_shares_grouped[i]));
+            o_vecs.push(Self::matrix_vector_multiply(
+                &vdm_matrix,
+                &o_sharings[i * o_group_len..(i + 1) * o_group_len],
+            ));
+            let base = i * z_vector_len;
             let mut z_vector = Vec::with_capacity(z_vector_len);
-            for k in 0..=(2 * self.num_faults) {
-                let a: &Vec<LargeField> = &a_vec_shares_grouped[i][k];
-                let b: &Vec<LargeField> = &b_vec_shares_grouped[i][k];
-                z_vector.push(Self::dot_product(a, b).add(r_shares_grouped[i][k].clone()));
+            for k in 0..z_vector_len {
+                z_vector.push(products[base + k].clone().add(r_sharings[base + k].clone()));
             }
             z_vectors.push(z_vector);
+        }
+        drop(products);
+        drop(o_sharings);
+
+        {
+            let depth_state = self.mult_state.depth_share_map.get_mut(&depth).unwrap();
+            if depth_state.util_rand_sharings.is_empty() {
+                depth_state.util_rand_sharings = r_sharings;
+            } else {
+                depth_state.util_rand_sharings.extend(r_sharings);
+            }
         }
 
         // One GEMM: party_powers (n × (2t+1)) · z_vectors (chunks vectors of length (2t+1))

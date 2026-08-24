@@ -24,10 +24,29 @@ async fn main() -> Result<()> {
     let syncer_file = m
         .value_of("syncer")
         .expect("Unable to parse syncer ip file");
-    let mixing_batch_size = m
-        .value_of("messages")
-        .expect("Unable to parse number of batches")
-        .parse::<usize>().unwrap();
+    let nn_x = m
+        .value_of("nn_x")
+        .unwrap_or("512")
+        .parse::<usize>()
+        .expect("nn_x must be a positive integer");
+    let nn_y = m
+        .value_of("nn_y")
+        .unwrap_or("128")
+        .parse::<usize>()
+        .expect("nn_y must be a positive integer");
+    let nn_batch = m
+        .value_of("nn_batch")
+        .unwrap_or("1")
+        .parse::<usize>()
+        .expect("nn_batch must be a positive integer");
+    let weight_chunk_size = m
+        .value_of("weight_chunk")
+        .unwrap_or("250000")
+        .parse::<usize>()
+        .expect("weight_chunk must be a positive integer");
+    assert!(nn_x > 0 && nn_y > 0 && nn_batch > 0 && weight_chunk_size > 0,
+        "nn_x, nn_y, nn_batch and weight_chunk must all be positive");
+    assert!(nn_y <= nn_x, "nn_y ({}) must not exceed nn_x ({})", nn_y, nn_x);
     let compression_factor = m
         .value_of("comp")
         .expect("Unable to parse compression factor")
@@ -102,8 +121,11 @@ async fn main() -> Result<()> {
         "mpc" => {
             exit_tx =
                 mpc::Context::spawn(
-                    config, 
-                    mixing_batch_size,
+                    config,
+                    nn_x,
+                    nn_y,
+                    nn_batch,
+                    weight_chunk_size,
                     compression_factor,
                     node_normal
                 ).or_else(|e| {

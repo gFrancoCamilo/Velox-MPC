@@ -1,7 +1,7 @@
 use crypto::aes_hash::MerkleTree;
 use lambdaworks_math::{polynomial::Polynomial};
 use protocol::ByteConversion;
-use protocol::LargeField;
+use protocol::{LargeField, hash_to_field};
 
 use crate::{Context, protocol::ACSSABState};
 
@@ -45,7 +45,7 @@ impl Context{
                     let share_root = MerkleTree::new(comm, &self.hash_context).root();
                     let blinding_root = MerkleTree::new(b_comm, &self.hash_context).root();
                     let root_comm = self.hash_context.hash_two(share_root, blinding_root);
-                    let root_comm_fe = LargeField::from_bytes_be(&root_comm).unwrap();
+                    let root_comm_fe = hash_to_field(&root_comm);
                     acss_state.commitment_root_fe.insert(sender, root_comm_fe);
 
                     // Compute DZK polynomial

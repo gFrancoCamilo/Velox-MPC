@@ -23,7 +23,7 @@ use types::{Replica, WrapperMsg, SyncMsg, SyncState};
 
 use crypto::{aes_hash::HashState, hash::Hash};
 
-use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, input::read_input_from_files, msg::ProtMsg, protocol::{online_phase::mix_circuit_state::MixCircuitState, rand_sharings::rand_mask::RandomOutputMaskStruct, MultState, RandSharings, VerificationState}};
+use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, msg::ProtMsg, protocol::{nn_inference::nn_state::{NnState, NUM_NN_LAYERS, WEIGHT_ACSS_ID_OFFSET, ACTIVATION_ACSS_ID_OFFSET, total_weights}, rand_sharings::rand_mask::RandomOutputMaskStruct, MultState, RandSharings, VerificationState}};
 
 /// Number of coins sent to the MVBA/ACS instances to facilitate consensus.
 pub const NUM_CONSENSUS_COINS: usize = 500;
@@ -49,12 +49,15 @@ pub struct Context {
     pub cancel_handlers: HashMap<u64, Vec<CancelHandler<Acknowledgement>>>,
     exit_rx: oneshot::Receiver<()>,
 
-    pub inputs: Vec<LargeField>,
-    pub input_acss_id_offset: usize,
-    
-    pub k_value: usize,
-    pub log_k: usize,
     pub tot_batches: usize,
+
+    /// Network shape: three stages of `nn_x` neurons feeding a final `nn_y`-neuron
+    /// layer, all-to-all, evaluated on `nn_batch` inputs at once.
+    pub nn_x: usize,
+    pub nn_y: usize,
+    pub nn_batch: usize,
+    /// Secrets per ACSS instance when a party's weight/activation block is split.
+    pub weight_chunk_size: usize,
 
     pub total_sharings_for_coins: usize,
 
@@ -95,12 +98,8 @@ pub struct Context {
     pub verf_state: VerificationState,
     // Random masks for the output
     pub output_mask_state: RandomOutputMaskStruct,
-    // Mix circuit state for mixing circuit implementation
-    pub mix_circuit_state: MixCircuitState,
-
-    pub field_div_2: LargeField,
-
-    pub tmp_mult_state: HashMap<usize, (Vec<LargeField>,Vec<Vec<LargeField>>)>,
+    // Neural-network inference state (weights, activations, layer progress)
+    pub nn_state: NnState,
 
     /// Fast fourier transforms utility
     pub use_fft: bool,
@@ -111,7 +110,11 @@ pub struct Context {
     pub max_depth: usize,
     pub output_mask_size: usize,
 
-    pub preprocessing_mult_depth: usize,
+    /// Tuple verification is disabled until the streaming/rolling verification
+    /// phase lands — see the TODO list. With it off, a malicious party can corrupt
+    /// the result undetected, so runs are semi-honest-only.
+    pub verification_enabled: bool,
+
     pub delinearization_depth: usize, 
     pub compression_factor: usize,
     pub multiplication_switch_threshold: usize,
@@ -120,7 +123,10 @@ pub struct Context {
 impl Context {
     pub fn spawn(
         config: Node,
-        mixing_batch_size: usize,
+        nn_x: usize,
+        nn_y: usize,
+        nn_batch: usize,
+        weight_chunk_size: usize,
         compression_factor: usize,
         _byz: bool
     ) -> anyhow::Result<oneshot::Sender<()>> {
@@ -220,33 +226,41 @@ impl Context {
 
         let use_fft = false;
 
-        let k = mixing_batch_size as u64;
-        let log_k = (u64::BITS - k.leading_zeros() -1) as usize;
-        let k = k as usize;
-
-        // TODO: rand_bit reconstruction uses this constant as a "p/2" threshold for
-        // square-root sign selection — that's a prime-field-specific operation, and
-        // the protocol's field is now Mersenne61 Fp4 (an extension field with no
-        // canonical p/2). Reworking rand_bit for extension fields is out of scope
-        // for the GPU/field-switch slice; placeholder zero keeps the build green.
-        let sqrt_power = LargeField::zero();
-        
-        let tot_sharings = (((k)*log_k*log_k)/(config.num_faults+1))+20;
         let num_batches = 1;
-        // Ensure this is a power of 2. 
+        let t = config.num_faults;
 
-        let high_threshold = 2*config.num_faults+1;
-        let inputs_per_party = (k / high_threshold) + 1;
+        // One DN inner product per (example, output neuron) across the three
+        // stages: b*(2x + y) in total, each of dimension x. Each consumes one
+        // degree-t sharing; the degree-2t zero sharings amortise at (t+1) per
+        // group of (2t+1).
+        let inner_products = nn_batch * (2 * nn_x + nn_y);
+        // Each stage pads its inner-product count up to a multiple of 2t+1, costing
+        // up to 2t extra degree-t masks per stage, and the coin pool is carved out
+        // of the same supply.
+        let padding_slack = NUM_NN_LAYERS * 2 * t;
+        let rand_sharings_needed = inner_products + padding_slack + 10 * config.num_nodes + 64;
 
-        let file_location_1 = format!("testdata/inputs/input_{}.txt", config.id);
-        let file_location_2 = format!("input_{}.txt", config.id);
+        // Randomness extraction yields (t+1) sharings per (2t+1) dealer
+        // contributions, and there are three degree-t batches.
+        let tot_sharings = ((rand_sharings_needed + (3 * num_batches * (t + 1)) - 1)
+            / (3 * num_batches * (t + 1))).max(1);
 
-        let inputs = read_input_from_files(file_location_1.as_str(),file_location_2.as_str(),inputs_per_party).or_else(|e| {
-            log::error!("Error reading input files: {}", e);
-            Err(e)
-        })?;
+        let output_mask_size = nn_batch * nn_y;
 
-        log::info!("Generating {} random sharings and proposing {} sharings over {} batches for mixing {} inputs", 8*(k/2)*log_k*log_k, tot_sharings, num_batches, k);
+        log::warn!(
+            "Tuple verification is DISABLED: this run is semi-honest-only and a \
+             malicious party can corrupt the inference result undetected."
+        );
+        log::info!(
+            "NN inference: [{x}, {x}, {x}, {y}] batch {b} -> {w} weights, {ip} inner products \
+             of dimension {x}; preprocessing {rs} degree-t sharings ({ts} secrets/dealer/batch)",
+            x = nn_x, y = nn_y, b = nn_batch,
+            w = total_weights(nn_x, nn_y),
+            ip = inner_products,
+            rs = rand_sharings_needed,
+            ts = tot_sharings,
+        );
+
         tokio::spawn(async move {
             let mut c = Context {
                 net_send: consensus_net,
@@ -265,12 +279,12 @@ impl Context {
 
                 max_id: rbc_start_id,
 
-                inputs: inputs.clone(),
-                input_acss_id_offset: 500,
-
-                k_value: k,
-                log_k: log_k,
                 tot_batches: num_batches,
+
+                nn_x: nn_x,
+                nn_y: nn_y,
+                nn_batch: nn_batch,
+                weight_chunk_size: weight_chunk_size,
 
                 total_sharings_for_coins: 10*config.num_nodes,
                 
@@ -300,19 +314,17 @@ impl Context {
                 mult_state: MultState::new(),
                 verf_state: VerificationState::new(),
                 output_mask_state: RandomOutputMaskStruct::new(),
-                mix_circuit_state: MixCircuitState::new(),
-                tmp_mult_state: HashMap::default(),
+                nn_state: NnState::new(),
 
-                field_div_2: sqrt_power,
 
                 use_fft: use_fft,
                 roots_of_unity: gen_roots_of_unity(config.num_nodes),
 
                 total_sharings: tot_sharings,
-                max_depth: log_k*log_k,
-                output_mask_size: 2*k/(config.num_faults+1),
+                max_depth: NUM_NN_LAYERS,
+                output_mask_size: output_mask_size,
 
-                preprocessing_mult_depth: 0,
+                verification_enabled: false,
                 delinearization_depth: 5000, 
                 compression_factor: compression_factor,
                 multiplication_switch_threshold: 0
@@ -459,8 +471,11 @@ impl Context {
                     )?;
                     log::info!("Received shares from ACSS module for instance {} from party {}",acss_msg_unwrap.0,acss_msg_unwrap.1);
                     // Check if the option is none. It means some party aborted
-                    if acss_msg_unwrap.0 >= self.input_acss_id_offset{
-                        self.handle_input_acss_termination(acss_msg_unwrap.0, acss_msg_unwrap.1, acss_msg_unwrap.2).await;
+                    if acss_msg_unwrap.0 >= ACTIVATION_ACSS_ID_OFFSET{
+                        self.handle_activation_acss_termination(acss_msg_unwrap.0, acss_msg_unwrap.1, acss_msg_unwrap.2).await;
+                    }
+                    else if acss_msg_unwrap.0 >= WEIGHT_ACSS_ID_OFFSET{
+                        self.handle_weight_acss_termination(acss_msg_unwrap.0, acss_msg_unwrap.1, acss_msg_unwrap.2).await;
                     }
                     else{
                         self.handle_acss_term_msg(acss_msg_unwrap.0, acss_msg_unwrap.1, acss_msg_unwrap.2).await;
