@@ -9,6 +9,11 @@ from benchmark.instance import InstanceManager
 from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
+# Number of parties. Velox tolerates t < n/3 and genconfig derives
+# t = (n-1)/3, so n=13 gives t=4, n=25 gives t=8, n=49 gives t=16.
+#
+# For a like-for-like comparison against Talos (which needs n = 4t+1), match on
+# t rather than n: Velox n=13 vs Talos n=17, n=25 vs n=33, n=49 vs n=65.
 n = 64
 
 # ---------------------------------------------------------------------------
