@@ -197,9 +197,22 @@ class BenchParameters:
                 raise ConfigError('Missing or invalid number of nodes')
             self.nodes = [int(x) for x in nodes]
 
-            self.num_messages = int(json['num_messages'])
+            # Network under test: full width list [d0, d1, ..., dL].
+            layers = json['nn_layers']
+            layers = layers if isinstance(layers, list) else [layers]
+            if len(layers) < 2 or any(int(x) <= 0 for x in layers):
+                raise ConfigError('nn_layers needs >= 2 positive widths')
+            self.nn_layers = [int(x) for x in layers]
 
-            self.batch_size = int(json['batch_size'])
+            # Batch size(s). A list sweeps several batches in one invocation.
+            batches = json['nn_batch']
+            batches = batches if isinstance(batches, list) else [batches]
+            if not batches or any(int(x) <= 0 for x in batches):
+                raise ConfigError('Missing or invalid nn_batch')
+            self.nn_batch = [int(x) for x in batches]
+
+            # Secrets per ACSS instance when a party's weight block is split.
+            self.weight_chunk = int(json.get('weight_chunk', 250_000))
 
             self.compression_factor = int(json['compression_factor'])
 
@@ -212,6 +225,23 @@ class BenchParameters:
 
         if min(self.nodes) <= self.faults:
             raise ConfigError('There should be more nodes than faults')
+
+    @property
+    def weights(self):
+        """Total dense weights: sum over stages of d_in * d_out."""
+        d = self.nn_layers
+        return sum(d[i] * d[i + 1] for i in range(len(d) - 1))
+
+    def inner_products(self, batch):
+        """Inner products (== degree-t double sharings) for one forward pass.
+
+        Depends only on the OUTPUT widths -- a wider input layer costs more
+        local GEMM but not one extra sharing.
+        """
+        return batch * sum(self.nn_layers[1:])
+
+    def arch_tag(self):
+        return '-'.join(str(w) for w in self.nn_layers)
 
 
 class PlotParameters:

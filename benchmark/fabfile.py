@@ -10,9 +10,39 @@ from benchmark.remote import Bench, BenchError
 from benchmark.utils import PathMaker
 
 n = 64
-num_messages = 256
-batch_size = 500
+
+# ---------------------------------------------------------------------------
+# Network under test: the full width list [d0, d1, ..., dL] of an all-to-all
+# feed-forward network. Weights = sum(d_i * d_{i+1}); inner products (and hence
+# degree-t double sharings) = nn_batch * sum(d[1:]) -- output widths only, so a
+# wider INPUT layer costs local GEMM but no extra sharings.
+#
+# Reference architectures (dense parts only):
+#   LeNet-300-100        [784, 300, 100, 10]              266K weights
+#   CIFAR-10 MLP         [3072, 2048, 1024, 512, 10]      8.9M weights
+#   VGG-16 head (CIFAR)  [512, 4096, 4096, 10]            18.9M weights
+#   AlexNet head         [9216, 4096, 4096, 1000]         58.6M weights
+#   VGG-16 head          [25088, 4096, 4096, 1000]        123.6M weights
+nn_layers = [3072, 2048, 1024, 512, 10]
+
+# A list sweeps these batch sizes sequentially (see the `sweep` task).
+nn_batch = [16, 32, 128]
+
+# Secrets per ACSS instance when a party's weight block is split.
+weight_chunk = 250_000
+
 compression_factor = 10
+
+
+def _bench_params(batch=None):
+    return {
+        'faults': 0,
+        'nodes': [n],
+        'nn_layers': nn_layers,
+        'nn_batch': [batch] if batch is not None else nn_batch,
+        'weight_chunk': weight_chunk,
+        'compression_factor': compression_factor,
+    }
 
 @task
 def create(ctx, nodes=n):
@@ -67,34 +97,30 @@ def install(ctx):
     except BenchError as e:
         Print.error(e)
 
-# We only use the `nodes` parameter in the list of all these parameters. 
+# We only use the `nodes` parameter in the list of all these parameters.
 @task
-def remote(ctx, debug=False):
-    ''' Run benchmarks on AWS '''
-    bench_params = {
-        'faults': 0,
-        'nodes': [n],
-        'num_messages': num_messages,
-        'batch_size': batch_size,
-        'compression_factor': compression_factor
-    }
+def remote(ctx, debug=False, batch=None):
+    ''' Configure the testbed and run one NN-inference benchmark '''
     try:
-        Bench(ctx).run(bench_params, debug)
+        Bench(ctx).run(_bench_params(), debug,
+                       int(batch) if batch is not None else None)
     except BenchError as e:
         Print.error(e)
 
 @task
-def rerun(ctx, debug=False):
-    ''' Run benchmarks on AWS '''
-    bench_params = {
-        'faults': 0,
-        'nodes': [n],
-        'num_messages': num_messages,
-        'batch_size': batch_size,
-        'compression_factor': compression_factor
-    }
+def rerun(ctx, debug=False, batch=None):
+    ''' Re-run without regenerating/uploading config files '''
     try:
-        Bench(ctx).justrun(bench_params, debug)
+        Bench(ctx).justrun(_bench_params(), debug,
+                           int(batch) if batch is not None else None)
+    except BenchError as e:
+        Print.error(e)
+
+@task
+def sweep(ctx, debug=False, timeout=1800):
+    ''' Run every batch size in `nn_batch`, sequentially, collecting logs '''
+    try:
+        Bench(ctx).sweep(_bench_params(), debug, int(timeout))
     except BenchError as e:
         Print.error(e)
 
@@ -125,17 +151,10 @@ def kill(ctx):
 
 
 @task
-def logs(ctx):
-    ''' Print a summary of the logs '''
-    ''' Run benchmarks on AWS '''
-    bench_params = {
-        'faults': 0,
-        'nodes': [n],
-        'num_messages': num_messages,
-        'batch_size': batch_size,
-        'compression_factor': compression_factor
-    }
+def logs(ctx, batch=None):
+    ''' Download the syncer/party logs for a completed run '''
     try:
-        Bench(ctx).pull_logs(bench_params)
+        Bench(ctx).pull_logs(_bench_params(),
+                             batch=int(batch) if batch is not None else None)
     except ParseError as e:
         Print.error(BenchError('Failed to parse logs', e))

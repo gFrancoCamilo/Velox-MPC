@@ -140,7 +140,7 @@ class Bench:
         g = Group(*ips, user='ubuntu', connect_kwargs=self.connect)
         print(g.run(' && '.join(cmd), hide=True))
 
-    def _config(self, hosts, bench_parameters):
+    def _config(self, hosts, bench_parameters, batch):
         Print.info('Generating configuration files...')
         #print(hosts)
         # Cleanup all local configuration files.
@@ -200,8 +200,7 @@ class Bench:
                 c.put(PathMaker.syncer(),'.')
             # Write the configuration file to the remote machine. 
             c.put(PathMaker.key_file(i), '.')
-            # Write the input file to the remote machine. 
-            c.put(PathMaker.input_file(i),'.')
+            # No input file: activations are generated in-protocol.
             # Write the ip_file to the remote machine. 
             c.put("ip_file",'.')
             
@@ -214,7 +213,9 @@ class Bench:
                 print('Running syncer')
                 cmd = CommandMaker.run_syncer(
                     PathMaker.key_file(i),
-                    bench_parameters.num_messages,
+                    bench_parameters.nn_layers,
+                    batch,
+                    bench_parameters.weight_chunk,
                     bench_parameters.compression_factor
                 )
                 print('Running the following command on the remote machine:', cmd)
@@ -222,14 +223,16 @@ class Bench:
                 self._background_run(ip, cmd, log_file)
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
-                bench_parameters.num_messages,
+                bench_parameters.nn_layers,
+                batch,
+                bench_parameters.weight_chunk,
                 bench_parameters.compression_factor
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)
         return committee
 
-    def _just_run(self, hosts, bench_parameters):
+    def _just_run(self, hosts, bench_parameters, batch):
         # While calling this method, the configuration files have already been written to the remote machines. 
         Print.info('Booting primaries...')
 
@@ -239,7 +242,9 @@ class Bench:
                 print('Running syncer')
                 cmd = CommandMaker.run_syncer(
                     PathMaker.key_file(i),
-                    bench_parameters.num_messages,
+                    bench_parameters.nn_layers,
+                    batch,
+                    bench_parameters.weight_chunk,
                     bench_parameters.compression_factor
                 )
                 print(cmd)
@@ -247,13 +252,15 @@ class Bench:
                 self._background_run(ip, cmd, log_file)
             cmd = CommandMaker.run_primary(
                 PathMaker.key_file(i),
-                bench_parameters.num_messages,
+                bench_parameters.nn_layers,
+                batch,
+                bench_parameters.weight_chunk,
                 bench_parameters.compression_factor
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)
 
-    def _logs(self, hosts, faults, bench_parameters):
+    def _logs(self, hosts, faults, bench_parameters, batch):
         # Delete local logs (if any).
         cmd = CommandMaker.clean_logs()
         subprocess.run([cmd], shell=True, stderr=subprocess.DEVNULL)
@@ -268,8 +275,8 @@ class Bench:
                     PathMaker.syncer_log_file(),
                     local=PathMaker.syncer_local_log_file(
                         bench_parameters.nodes[0],
-                        bench_parameters.num_messages,
-                        bench_parameters.batch_size,
+                        bench_parameters.arch_tag(),
+                        batch,
                         bench_parameters.compression_factor
                     )
                 )
@@ -278,15 +285,15 @@ class Bench:
                     local= PathMaker.client_local_log_file(
                         i,
                         bench_parameters.nodes[0],
-                        bench_parameters.num_messages,
-                        bench_parameters.batch_size,
+                        bench_parameters.arch_tag(),
+                        batch,
                         bench_parameters.compression_factor
                     )
                 )
 
         Print.info('Downloaded logs from server, check latencies in the logs folder')
 
-    def run(self, bench_parameters_dict, debug=False):
+    def run(self, bench_parameters_dict, debug=False, batch=None):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -311,13 +318,14 @@ class Bench:
         # Upload all configuration files and run the protocol. 
         try:
             committee = self._config(
-                selected_hosts, bench_parameters
+                selected_hosts, bench_parameters,
+                batch if batch is not None else bench_parameters.nn_batch[0]
             )
         except (subprocess.SubprocessError, GroupException) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to configure nodes', e)
 
-    def justrun(self, bench_parameters_dict, debug=False):
+    def justrun(self, bench_parameters_dict, debug=False, batch=None):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -342,13 +350,14 @@ class Bench:
         # Upload all configuration files.
         try:
             committee = self._just_run(
-                selected_hosts, bench_parameters
+                selected_hosts, bench_parameters,
+                batch if batch is not None else bench_parameters.nn_batch[0]
             )
         except (subprocess.SubprocessError, GroupException) as e:
             e = FabricError(e) if isinstance(e, GroupException) else e
             raise BenchError('Failed to configure nodes', e)
 
-    def pull_logs(self, bench_parameters_dict, debug=False):
+    def pull_logs(self, bench_parameters_dict, debug=False, batch=None):
         assert isinstance(debug, bool)
         Print.heading('Starting remote benchmark')
         try:
@@ -358,4 +367,86 @@ class Bench:
 
         # Select which hosts to use.
         selected_hosts = self._select_hosts(bench_parameters)
-        self._logs(selected_hosts,0, bench_parameters)
+        self._logs(selected_hosts, 0, bench_parameters,
+                   batch if batch is not None else bench_parameters.nn_batch[0])
+
+    def _wait_for_output_phase(self, host, timeout, poll=10):
+        """Poll node 0's syncer log until the output phase is reported.
+
+        The syncer emits one line per phase; the run is finished once the
+        `"output"` phase appears. Returns True on completion, False on timeout.
+        """
+        c = Connection(host, user='ubuntu', connect_kwargs=self.connect)
+        waited = 0
+        while waited < timeout:
+            sleep(poll)
+            waited += poll
+            try:
+                out = c.run(
+                    f'grep -c \'status {{"output"}}\' {PathMaker.syncer_log_file()} || true',
+                    hide=True
+                ).stdout.strip()
+                if out and int(out.splitlines()[-1]) > 0:
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def sweep(self, bench_parameters_dict, debug=False, timeout=1800):
+        """Run every batch size in `nn_batch`, one at a time.
+
+        Runs are strictly sequential: each one is booted, waited on until the
+        syncer reports the output phase, collected, and killed before the next
+        starts. Overlapping runs contend for memory on every host and have
+        taken machines down.
+        """
+        Print.heading('Starting NN-inference batch sweep')
+        try:
+            bench_parameters = BenchParameters(bench_parameters_dict)
+        except ConfigError as e:
+            raise BenchError('Invalid nodes or bench parameters', e)
+
+        selected_hosts = self._select_hosts(bench_parameters)
+        if not selected_hosts:
+            Print.warn('There are not enough instances available')
+            return
+
+        try:
+            self._update(selected_hosts)
+        except (GroupException, ExecutionError) as e:
+            e = FabricError(e) if isinstance(e, GroupException) else e
+            raise BenchError('Failed to update nodes', e)
+
+        arch = bench_parameters.arch_tag()
+        weights = bench_parameters.weights
+        first = True
+        for batch in bench_parameters.nn_batch:
+            ips = bench_parameters.inner_products(batch)
+            Print.info(
+                f'[{arch}] batch {batch}: {weights:,} weights, '
+                f'{ips:,} inner products'
+            )
+            try:
+                # The first run also (re)generates and uploads config files;
+                # later runs reuse them, only the launch flags change.
+                if first:
+                    self._config(selected_hosts, bench_parameters, batch)
+                    first = False
+                else:
+                    self._just_run(selected_hosts, bench_parameters, batch)
+            except (subprocess.SubprocessError, GroupException) as e:
+                e = FabricError(e) if isinstance(e, GroupException) else e
+                raise BenchError(f'Failed to launch batch {batch}', e)
+
+            finished = self._wait_for_output_phase(selected_hosts[0], timeout)
+            if not finished:
+                Print.warn(f'batch {batch} did not reach the output phase '
+                           f'within {timeout}s; collecting logs anyway')
+
+            self._logs(selected_hosts, bench_parameters.faults,
+                       bench_parameters, batch)
+            self.kill(hosts=selected_hosts, delete_logs=False)
+            sleep(10)
+
+        Print.info('Sweep complete. Summarize with: '
+                   'cd logs && python3 compile_results.py')

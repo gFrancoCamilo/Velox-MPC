@@ -3,13 +3,27 @@ Based on [Narwhal](https://github.com/facebookresearch/narwhal).
 
 This document explains how to benchmark the codebase and read benchmarks' results. It also provides a step-by-step tutorial to run benchmarks on [Amazon Web Services (AWS)](https://aws.amazon.com) across multiple data centers (WAN).
 
-The configuration requirements for this protocol can be specified in the `fabfile.py` file in the first four lines of code. 
+This branch benchmarks **dense neural-network inference**, not anonymous broadcast.
+The network under test is configured near the top of `fabfile.py`:
 ```python
-n = 16
-num_messages = 256
-batch_size = 1000
+n = 64
+nn_layers = [3072, 2048, 1024, 512, 10]   # full width list [d0, d1, ..., dL]
+nn_batch  = [16, 32, 128]                 # a list sweeps these sequentially
+weight_chunk = 250_000
 compression_factor = 10
 ```
+`nn_layers` is the complete width list of an all-to-all feed-forward network.
+Everything else is derived from it:
+
+| quantity | formula |
+|---|---|
+| dense weights | `sum(d[i] * d[i+1])` |
+| inner products (= degree-t double sharings) | `nn_batch * sum(d[1:])` |
+| local field multiplications | `nn_batch * weights` |
+| sequential DN stages | `len(nn_layers) - 1` |
+
+Note that the inner-product count depends only on the **output** widths — a wider
+input layer costs more local GEMM but not one extra sharing.
 
 ## Setup
 The core protocols are written in Rust, but all benchmarking scripts are written in Python and run with [Fabric](http://www.fabfile.org/). To run the remote benchmark, install the python dependencies:
@@ -130,54 +144,103 @@ This may take a long time as the command will first update all instances.
 The commands `fab stop` and `fab start` respectively stop and start the testbed without destroying it (it is good practice to stop the testbed when not in use as AWS can be quite expensive); and `fab destroy` terminates all instances and destroys the testbed. Note that, depending on the instance types, AWS instances may take up to several minutes to fully start or stop. The command `fab info` displays a nice summary of all available machines and information to manually connect to them (for debug).
 
 ### Step 5. Run a benchmark
-After setting up the testbed, modify the parameters in the first 4 lines of `fabfile.py` file. Set four parameters:
+After setting up the testbed, set the parameters near the top of `fabfile.py`:
 1. Number of parties `n`
-2. Number of messages to broadcast or anonymity set size `k`
-3. Batch size - Number of secrets to be batched within each ACSS instance `batch_size`
-4. Compression factor - A parameter controlling the tradeoff between rounds and computation in the verification phase. Check the paper for more details. 
+2. `nn_layers` — the width list of the network to evaluate
+3. `nn_batch` — batch size, or a list of batch sizes to sweep
+4. `weight_chunk` — secrets per ACSS instance when a party's weight block is split
+5. `compression_factor` — rounds/computation tradeoff in the verification phase
 
-But before starting the protocol, create input files containing the messages to broadcast. 
-A script has been included in the `inputs/` directory for input generation. 
+There are **no input files to generate**. Weights and input activations are both
+produced in-protocol: each party ACSS-shares an equal-sized block of the flat
+weight array and of the `nn_batch * d0` activation array, and the online phase
+begins only once all `n` parties have delivered every chunk. (The old
+`inputs/inp_gen.py` text-payload generator has been removed along with the
+node's text input loader.)
+
+Some reference architectures, dense parts only:
+
+| network | `nn_layers` | weights |
+|---|---|---|
+| LeNet-300-100 | `[784, 300, 100, 10]` | 266,200 |
+| CIFAR-10 MLP | `[3072, 2048, 1024, 512, 10]` | 8,918,016 |
+| VGG-16 head (CIFAR-10) | `[512, 4096, 4096, 10]` | 18,915,328 |
+| AlexNet head | `[9216, 4096, 4096, 1000]` | 58,621,952 |
+| VGG-16 head (ImageNet) | `[25088, 4096, 4096, 1000]` | 123,633,664 |
+
+To configure the testbed and run a single benchmark:
 ```bash
-cd inputs/
-python3 inp_gen.py
+fab remote                # uses nn_batch[0]
+fab remote --batch=128    # override the batch size
 ```
-Then, set the following parameters in `fabfile.py`. 
-```python
-n = 16
-num_messages = 256
-batch_size = 1000
-compression_factor = 10
-```
-This command first updates all machines with the latest commit of the GitHub repo and branch specified in the [settings.json](https://github.com/akhilsb/Velox-MPC/blob/master/benchmark/settings.json) (step 3) file; this ensures that benchmarks are always run with the latest version of the code. 
-It then generates and uploads the configuration files to each machine, and runs the benchmarks with the specified parameters. Make sure to change the number of nodes in the `remote` function. 
-The input parameters for the protocol can be set in the `_config` function in the benchmark/remote.py file in the `benchmark` folder. 
+This first updates all machines to the latest commit of the branch specified in
+[settings.json](settings.json), then generates and uploads configuration files
+and boots the protocol.
 
-### Step 6: Download logs and Compile results
-Download log files after allowing the protocol sufficient time to terminate (Ideally within 2 minutes). 
-The following command downloads the log file from the `syncer` titled `syncer-n_{num_parties}_{num_messages}_{batch_size}_{compression_factor}.log` into the `benchmark/logs/` directory. 
+To run every batch size in `nn_batch` **sequentially** — booting, waiting for the
+output phase, collecting logs, and killing each run before the next starts:
+```bash
+fab sweep
+fab sweep --timeout=3600  # per-run timeout in seconds, default 1800
+```
+Runs must never overlap: every party holds a share of *every* weight, so two
+concurrent runs contend for memory on all hosts.
+
+`fab rerun` re-launches without regenerating or re-uploading the config files.
+
+### Step 6: Download logs and compile results
+`fab sweep` collects logs itself. After a `fab remote` or `fab rerun`, download
+them once the protocol has terminated:
 ```bash
 fab logs
+fab logs --batch=128      # must match the batch that was run
 ```
-This file contains the details about the latency of the protocol and the outputs of the nodes. 
-If anything goes wrong during a benchmark, you can always stop it by running `fab kill`.
-Once this command terminates, cd into the `logs/` directory and run the `stats.py` file to generate results. 
+Logs land in `benchmark/logs/` as
+`syncer-n_{nodes}_{d0}-{d1}-...-{dL}_b{batch}_c{compression}.log`.
+Then summarize:
 ```bash
+cd logs/
 python3 compile_results.py
 ```
-This command should print out the results as follows. 
+The syncer reports **cumulative** latency at each phase boundary, so the script
+reports both the cumulative figure and each phase's own duration, plus a
+batch-scaling table when several batch sizes share an architecture:
 ```
-Average latencies per category:
-  Preprocessing: 3440.64 ms
-  Online: 3714.00 ms
-  verification: 4110.00 ms
-  output: 4288.73 ms
+=== syncer-n_4_3072-2048-1024-512-10_b128_c10.log ===
+  network 3072-2048-1024-512-10  n=4  batch=128
+  8,918,016 weights, 460,032 inner products (= degree-t double sharings)
+  phase              cumulative     duration
+  Preprocessing          4228ms       4228ms
+  Input                 30501ms      26273ms
+  Online                33996ms       3495ms
+  output                34039ms         43ms
+  total                 34039ms   (265.9 ms per inference)
 
-Latency differences between subsequent categories:
-  Preprocessing → Online: 273.36 ms
-  Online → verification: 396.00 ms
-  verification → output: 178.73 ms
+=== batch scaling: 3072-2048-1024-512-10, n=4 ===
+    batch   inner products      total  per inference
+       16           57,504    24417ms       1526.1ms
+       32          115,008    25794ms        806.1ms
+      128          460,032    34039ms        265.9ms
 ```
+
+The four phases are:
+
+| phase | what it covers | scales with |
+|---|---|---|
+| Preprocessing | random double sharings (ACSS + Sh2t + AVSS masks), ACS | inner products, i.e. `batch` |
+| Input | ACSS of the weight and activation blocks; barrier on **all `n`** dealers | weights (fixed in `batch`) |
+| Online | the `L` DN inner-product stages | `batch * weights` |
+| output | masked reconstruction, CTRBC, second ACS | `batch * d_L` |
+
+Because weights are shared once regardless of batch size, the input phase is
+roughly constant while everything else grows with `batch` — which is why
+per-inference cost falls sharply as the batch grows.
+
+**The verification phase is currently disabled** (`Context::verification_enabled`
+is `false`), so no `verification` line appears and runs are semi-honest-only. See
+`NN_INFERENCE_TODO.md` in the repository root.
+
+If anything goes wrong during a benchmark, stop it with `fab kill`.
 
 ### Step 7: Cleanup
 Be sure to kill the prior benchmark using the following command before running a new benchmark. 
@@ -194,27 +257,22 @@ This command destroys the testbed and terminates all created AWS instances.
 For running a benchmark with a different testbed setup, execute the pipeline from Step 3. 
 
 # Reproducing the results in the paper
-To reproduce the results in the paper, run Velox in a LAN testbed (with a single region for instance `us-east-1`) with `n=16,64,112` parties. 
-In the `n=16` testbed, run Velox with the following configurations in the `fabfile.py` file.
-**Note that we substantially improved our code from the time of submission, so the protocol is a lot faster at these configurations, which result in lower runtimes.** 
-1. `num_messages=256`,`batch_size=2000`, `compression_factor=10`
-2. `num_messages=512`,`batch_size=2000`, `compression_factor=10`
-3. `num_messages=1024`,`batch_size=2000`, `compression_factor=10`
 
-In the `n=64` testbed, run Velox with the following configurations in the `fabfile.py` file. 
-1. `num_messages=256`,`batch_size=500`, `compression_factor=10`
-2. `num_messages=512`,`batch_size=500`, `compression_factor=10`
-3. `num_messages=1024`,`batch_size=500`, `compression_factor=10`
+**The configurations below belong to the anonymous-broadcast (mixing-circuit)
+protocol, which this branch replaces with NN inference.** They are kept for
+reference; to reproduce the paper's numbers, check out `master`, where
+`num_messages` / `batch_size` / `compression_factor` still drive the mixing
+circuit.
 
-In the `n=112` testbed, run Velox with the following configurations in the `fabfile.py` file. 
-1. `num_messages=256`,`batch_size=300`, `compression_factor=10`
-2. `num_messages=512`,`batch_size=300`, `compression_factor=10`
+For NN-inference results on this branch, sweep `nn_batch` for a fixed
+`nn_layers` and read the batch-scaling table from `compile_results.py`. Useful
+axes to vary:
 
-## Reproducing results in Figure 1
-For reproducing results of Figure 1 in the paper (phase-wise runtime), use the results of the instances with `n=64` parties. 
+- **batch size** — separates the fixed cost of weight distribution from the
+  per-inference cost.
+- **architecture** — average inner-product dimension (`weights / IP-per-example`)
+  decides whether a workload is preprocessing-bound or compute-bound. LeNet-300-100
+  sits at ~649, the CIFAR-10 MLP at ~2,481, the ImageNet VGG-16 head at ~13,451.
+- **party count `n`** — note the input phase waits for all `n` dealers, so it has
+  no fault tolerance; a single crashed party stalls the run.
 
-## Reproducing results in Figure 2
-For reproducing results in Figure 2 in the paper (Anonymity set size k vs runtime), use the previous figure's result for `n=64` and add the results of `n=16` parties into the paper.
-
-## Reproducing results in Figure 3
-For reproducing results in Figure 3 in the paper (Scalability plot:), add the results with `n=112` parties to the figure. 

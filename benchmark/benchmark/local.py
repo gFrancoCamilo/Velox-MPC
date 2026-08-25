@@ -112,7 +112,11 @@ class LocalBench:
                 if i == 0:
                     cmd = CommandMaker.run_syncer(
                         PathMaker.key_file(i),
-                        self.num_messages,
+                        self.nn_layers,
+                        # `nn_batch` is a list (a sweep) in BenchParameters;
+                        # the local bench runs a single configuration.
+                        self.nn_batch[0],
+                        self.weight_chunk,
                         self.compression_factor,
                         debug=debug,
                     )
@@ -120,7 +124,9 @@ class LocalBench:
                     self._background_run(cmd, log_file)
                 cmd = CommandMaker.run_primary(
                     PathMaker.key_file(i),
-                    self.num_messages,
+                    self.nn_layers,
+                    self.nn_batch[0],
+                    self.weight_chunk,
                     self.compression_factor,
                     debug=debug,
                 )

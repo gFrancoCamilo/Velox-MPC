@@ -35,10 +35,10 @@ class PathMaker:
         assert isinstance(i, int) and i >= 0
         return f'nodes-{i}.json'
 
-    @staticmethod
-    def input_file(i):
-        assert isinstance(i, int) and i >= 0
-        return f'inputs/input_{i}.txt'
+    # `input_file` is gone: NN inference generates its input activations
+    # in-protocol (each party ACSS-shares an equal block of the b*d0 activation
+    # array), so there is nothing to upload. The old text-file loader existed
+    # for anonymous-broadcast payloads and has been deleted from the node.
 
     @staticmethod
     def db_path(i, j=None):
@@ -71,18 +71,17 @@ class PathMaker:
         #return join(PathMaker.logs_path(), f'client-{i}-{j}.log')
 
     @staticmethod
-    def client_local_log_file(i,n,num_messages,batch_size,compr_factor):
+    def client_local_log_file(i, n, arch_tag, nn_batch, compr_factor):
         assert isinstance(i, int) and i >= 0
-        #assert isinstance(j, int) and i >= 0
-        return join('logs',f'party-{i}_n_{n}_{num_messages}_{batch_size}_{compr_factor}.log')
+        return join('logs', f'party-{i}_n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}.log')
     
     @staticmethod
     def syncer_log_file():
         return join(PathMaker.logs_path(), f'syncer.log')
     
     @staticmethod
-    def syncer_local_log_file(n,num_messages,batch_size,compr_factor):
-        return join('logs', f'syncer-n_{n}_{num_messages}_{batch_size}_{compr_factor}.log')
+    def syncer_local_log_file(n, arch_tag, nn_batch, compr_factor):
+        return join('logs', f'syncer-n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}.log')
     @staticmethod
     def results_path():
         return 'results'

@@ -41,18 +41,42 @@ class CommandMaker:
         )
 
     @staticmethod
-    def run_primary(key, mixing_batch_size, compression_factor, debug=False):
-        assert isinstance(key, str)
-        assert isinstance(debug, bool)
-        return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol mpc --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
+    def _nn_args(nn_layers, nn_batch, weight_chunk, compression_factor):
+        """Flags describing the network under test.
+
+        `nn_layers` is the full width list `[d0, d1, ..., dL]` of an all-to-all
+        feed-forward network, e.g. `[3072, 2048, 1024, 512, 10]`. The node
+        derives everything else from it: weights = sum(d_{i}*d_{i+1}), and
+        inner products = nn_batch * sum(d[1:]).
+
+        The old `--messages` flag drove the anonymous-broadcast mixing circuit
+        and is a no-op for NN inference. Passing it alone (as this file used to)
+        left the node on its *default* architecture, so the benchmark silently
+        measured a model nobody asked for.
+        """
+        assert isinstance(nn_layers, (list, tuple)) and len(nn_layers) >= 2
+        assert all(isinstance(w, int) and w > 0 for w in nn_layers)
+        assert isinstance(nn_batch, int) and nn_batch > 0
+        assert isinstance(weight_chunk, int) and weight_chunk > 0
+        layers = ','.join(str(w) for w in nn_layers)
+        return (f'--nn_layers {layers} --nn_batch {nn_batch} '
+                f'--weight_chunk {weight_chunk} --comp {compression_factor}')
 
     @staticmethod
-    def run_syncer(key, mixing_batch_size, compression_factor, debug=False):
+    def run_primary(key, nn_layers, nn_batch, weight_chunk, compression_factor, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
+        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor)
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
-                f'--protocol sync --syncer syncer --messages {mixing_batch_size} --comp {compression_factor} --byzantine false')
+                f'--protocol mpc --syncer syncer {args} --byzantine false')
+
+    @staticmethod
+    def run_syncer(key, nn_layers, nn_batch, weight_chunk, compression_factor, debug=False):
+        assert isinstance(key, str)
+        assert isinstance(debug, bool)
+        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor)
+        return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
+                f'--protocol sync --syncer syncer {args} --byzantine false')
 
     @staticmethod
     def unzip_tkeys(fileloc, debug=False):
