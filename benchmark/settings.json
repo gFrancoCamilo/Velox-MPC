@@ -1,18 +1,19 @@
 {
     "key": {
-        "name": "ccs_artifact",
-        "path": "/home/akhil/.ssh/ccs_artifact.pem"
+        "name": "aws",
+        "path": "/home/akhil/.ssh/aws.pem"
     },
     "port": 5000,
-    "client_base_port": 7500,
-    "client_run_port": 8000,
+    "client_base_port": 9000,
+    "client_run_port": 9500,
     "repo": {
         "name": "Velox-MPC",
-        "url": "https://github.com/akhilsb/Velox-MPC.git",
-        "branch": "master"
+        "url": "https://github.com/gFrancoCamilo/Velox-MPC.git",
+        "branch": "nn_inference"
     },
     "instances": {
-        "type": "c5.large",
-        "regions": ["us-east-1"]
+        "type": "r7i.xlarge",
+        "regions": ["us-east-1"],
+        "use_private_ips": true
     }
 }

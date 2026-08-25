@@ -97,6 +97,48 @@ class Bench:
         except GroupException as e:
             raise BenchError('Failed to kill nodes', FabricError(e))
 
+    def _peer_hosts(self, hosts):
+        """Addresses the nodes should dial each other on.
+
+        `hosts` are the public addresses Fabric SSHes to. The protocol's own
+        traffic is far heavier and, within one region, can use the VPC-internal
+        addresses instead: it then never crosses the internet gateway, so it is
+        not billed as inter-AZ/internet data transfer and the round trip is
+        shorter. SSH keeps using the public addresses either way.
+
+        Falls back to the public address for any host whose private address is
+        unavailable, and returns the input unchanged when private addressing is
+        disabled or the testbed spans several regions.
+        """
+        if not getattr(self.settings, 'use_private_ips', False):
+            return list(hosts)
+
+        public = self.manager.hosts()
+        private = self.manager.hosts(private=True)
+        # hosts(private=True) already degrades to public addresses when more
+        # than one region is configured, in which case this mapping is identity.
+        mapping = {}
+        for region, pub in public.items():
+            priv = private.get(region, [])
+            for i, ip in enumerate(pub):
+                if i < len(priv) and priv[i]:
+                    mapping[ip] = priv[i]
+
+        resolved = [mapping.get(h, h) for h in hosts]
+        missing = [h for h in hosts if h not in mapping]
+        if missing:
+            Print.warn(
+                f'{len(missing)} host(s) have no private address; '
+                f'using their public address for protocol traffic'
+            )
+        changed = sum(1 for a, b in zip(hosts, resolved) if a != b)
+        if changed:
+            Print.info(
+                f'Protocol traffic will use intra-region addresses for '
+                f'{changed}/{len(hosts)} nodes'
+            )
+        return resolved
+
     def _select_hosts(self, bench_parameters):
         # Collocate the primary and its workers on the same machine.
         nodes = max(bench_parameters.nodes)
@@ -160,14 +202,16 @@ class Bench:
         cmd = CommandMaker.generate_config_files(self.settings.base_port,self.settings.client_base_port,self.settings.client_run_port,len(hosts))
         subprocess.run(cmd,shell=True)
         names = [str(x) for x in range(len(hosts))]
+        # SSH uses `hosts`; the protocol dials `peers`.
+        peers = self._peer_hosts(hosts)
         ip_file = ""
         syncer=""
         for x in range(len(hosts)):
             port = self.settings.base_port + x
             syncer_port = self.settings.client_base_port + x
-            ip_file += hosts[x]+ ":"+ str(port) + "\n"
-            syncer += hosts[x] + ":" + str(syncer_port) + "\n"
-        ip_file += hosts[0] + ":" + str(self.settings.client_run_port) + "\n"
+            ip_file += peers[x] + ":" + str(port) + "\n"
+            syncer += peers[x] + ":" + str(syncer_port) + "\n"
+        ip_file += peers[0] + ":" + str(self.settings.client_run_port) + "\n"
         with open("ip_file", 'w') as f:
             f.write(ip_file)
         f.close()

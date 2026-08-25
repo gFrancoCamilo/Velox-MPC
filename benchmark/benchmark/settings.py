@@ -8,7 +8,7 @@ class SettingsError(Exception):
 
 class Settings:
     def __init__(self, key_name, key_path, base_port,client_base_port,client_run_port, repo_name, repo_url,
-                 branch, instance_type, aws_regions):
+                 branch, instance_type, aws_regions, use_private_ips=True):
         inputs_str = [
             key_name, key_path, repo_name, repo_url, branch, instance_type
         ]
@@ -38,6 +38,16 @@ class Settings:
         self.instance_type = instance_type
         self.aws_regions = regions
 
+        # Address the nodes dial each other on. Private (VPC-internal) addresses
+        # keep inter-node traffic inside the region: it never leaves for the
+        # internet gateway, so it is not billed as data transfer and the round
+        # trip is shorter. Public addresses are still used for SSH.
+        #
+        # Private addresses are only routable *within* a region, so a
+        # multi-region testbed falls back to public ones (see
+        # InstanceManager.hosts).
+        self.use_private_ips = bool(use_private_ips)
+
     @classmethod
     def load(cls, filename):
         try:
@@ -55,6 +65,7 @@ class Settings:
                 data['repo']['branch'],
                 data['instances']['type'],
                 data['instances']['regions'],
+                data['instances'].get('use_private_ips', True),
             )
         except (OSError, JSONDecodeError) as e:
             raise SettingsError(str(e))

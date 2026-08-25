@@ -37,7 +37,9 @@ class InstanceManager:
     def _get(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
-        ids, ips = defaultdict(list), defaultdict(list)
+        ids, ips, private_ips = (
+            defaultdict(list), defaultdict(list), defaultdict(list)
+        )
         for region, client in self.clients.items():
             r = client.describe_instances(
                 Filters=[
@@ -55,15 +57,19 @@ class InstanceManager:
             for x in instances:
                 ids[region] += [x['InstanceId']]
                 if 'PublicIpAddress' in x:
+                    # Append in lockstep so ips[region][i] and
+                    # private_ips[region][i] always describe the same instance;
+                    # a running instance can briefly lack one or the other.
                     ips[region] += [x['PublicIpAddress']]
-        return ids, ips
+                    private_ips[region] += [x.get('PrivateIpAddress', '')]
+        return ids, ips, private_ips
 
     def _wait(self, state):
         # Possible states are: 'pending', 'running', 'shutting-down',
         # 'terminated', 'stopping', and 'stopped'.
         while True:
             sleep(1)
-            ids, _ = self._get(state)
+            ids, _, _ = self._get(state)
             if sum(len(x) for x in ids.values()) == 0:
                 break
 
@@ -168,7 +174,7 @@ class InstanceManager:
 
     def terminate_instances(self):
         try:
-            ids, _ = self._get(['pending', 'running', 'stopping', 'stopped'])
+            ids, _, _ = self._get(['pending', 'running', 'stopping', 'stopped'])
             size = sum(len(x) for x in ids.values())
             if size == 0:
                 Print.heading(f'All instances are shut down')
@@ -194,7 +200,7 @@ class InstanceManager:
     def start_instances(self, max):
         size = 0
         try:
-            ids, _ = self._get(['stopping', 'stopped'])
+            ids, _, _ = self._get(['stopping', 'stopped'])
             for region, client in self.clients.items():
                 if ids[region]:
                     target = ids[region]
@@ -207,7 +213,7 @@ class InstanceManager:
 
     def stop_instances(self):
         try:
-            ids, _ = self._get(['pending', 'running'])
+            ids, _, _ = self._get(['pending', 'running'])
             for region, client in self.clients.items():
                 if ids[region]:
                     client.stop_instances(InstanceIds=ids[region])
@@ -217,7 +223,9 @@ class InstanceManager:
             raise BenchError(AWSError(e))
 
     # To run on CloudLab/Chameleon, create a list of ip addresses and add them to a file titled 'instance_ips'.
-    def hosts(self, flat=False):
+    def hosts(self, flat=False, private=False):
+        """Public addresses by default; `private=True` returns the VPC-internal
+        ones, in the same per-region order, for the protocol's own traffic."""
         # import json
         # with open("instance-ips.json") as json_file:
         #     json_data = json.load(json_file)
@@ -226,7 +234,30 @@ class InstanceManager:
         #     else:
         #         return json_data
         try:
-           _, ips = self._get(['pending', 'running'])
+           _, ips, private_ips = self._get(['pending', 'running'])
+           if private:
+               # Private addresses do not route between regions, so a
+               # multi-region testbed has to keep using public ones.
+               if len(self.clients) > 1:
+                   Print.warn(
+                       'Private addresses are not routable across regions; '
+                       f'falling back to public addresses for '
+                       f'{len(self.clients)} regions'
+                   )
+               else:
+                   # Per host, fall back to the public address when the private
+                   # one is missing, so a caller never receives an empty string
+                   # that would serialize into `ip_file` as a bare ":port".
+                   ips = {
+                       region: [
+                           (private_ips[region][i]
+                            if i < len(private_ips.get(region, []))
+                            and private_ips[region][i]
+                            else pub)
+                           for i, pub in enumerate(pubs)
+                       ]
+                       for region, pubs in ips.items()
+                   }
            return [x for y in ips.values() for x in y] if flat else ips
         except ClientError as e:
            raise BenchError('Failed to gather instances IPs', AWSError(e))

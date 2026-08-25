@@ -143,6 +143,22 @@ Initialized testbed of 16 nodes
 This may take a long time as the command will first update all instances.
 The commands `fab stop` and `fab start` respectively stop and start the testbed without destroying it (it is good practice to stop the testbed when not in use as AWS can be quite expensive); and `fab destroy` terminates all instances and destroys the testbed. Note that, depending on the instance types, AWS instances may take up to several minutes to fully start or stop. The command `fab info` displays a nice summary of all available machines and information to manually connect to them (for debug).
 
+
+### Intra-region addressing
+`"use_private_ips": true` (the default) makes the nodes dial each other on their
+**VPC-internal** addresses instead of their public ones. SSH still uses the public
+addresses, so `fab` works unchanged; only the contents of `ip_file` and `syncer` change.
+
+This matters because the protocol moves far more bytes than the control plane. Traffic
+between public addresses leaves through the internet gateway and is billed as data
+transfer; traffic between private addresses inside one region stays in the VPC, is not
+billed the same way, and takes a shorter path.
+
+Private addresses are **only routable within a region**. With more than one region in
+`regions`, the harness warns and falls back to public addresses automatically, so a
+geo-distributed run still works. Set `"use_private_ips": false` to force public
+addressing.
+
 ### Step 5. Run a benchmark
 After setting up the testbed, set the parameters near the top of `fabfile.py`:
 1. Number of parties `n`
