@@ -167,7 +167,7 @@ impl Context{
                 
                 if crate::protocol::nn_inference::nn_reference::deterministic_mode() {
                     let expected = crate::protocol::nn_inference::nn_reference::reference_output(
-                        self.nn_x, self.nn_y, self.nn_batch);
+                        &self.nn_widths, self.nn_batch);
                     if expected.len() != unmasked_outputs.len() {
                         log::error!("NN CHECK FAILED: reconstructed {} wires, reference has {}",
                             unmasked_outputs.len(), expected.len());

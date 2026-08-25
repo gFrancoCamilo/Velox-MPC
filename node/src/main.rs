@@ -24,16 +24,16 @@ async fn main() -> Result<()> {
     let syncer_file = m
         .value_of("syncer")
         .expect("Unable to parse syncer ip file");
-    let nn_x = m
-        .value_of("nn_x")
-        .unwrap_or("512")
-        .parse::<usize>()
-        .expect("nn_x must be a positive integer");
-    let nn_y = m
-        .value_of("nn_y")
-        .unwrap_or("128")
-        .parse::<usize>()
-        .expect("nn_y must be a positive integer");
+    let nn_widths: Vec<usize> = m
+        .value_of("nn_layers")
+        .unwrap_or("512,512,512,128")
+        .split(',')
+        .map(|w| {
+            w.trim()
+                .parse::<usize>()
+                .expect("nn_layers must be a comma-separated list of positive integers")
+        })
+        .collect();
     let nn_batch = m
         .value_of("nn_batch")
         .unwrap_or("1")
@@ -44,9 +44,12 @@ async fn main() -> Result<()> {
         .unwrap_or("250000")
         .parse::<usize>()
         .expect("weight_chunk must be a positive integer");
-    assert!(nn_x > 0 && nn_y > 0 && nn_batch > 0 && weight_chunk_size > 0,
-        "nn_x, nn_y, nn_batch and weight_chunk must all be positive");
-    assert!(nn_y <= nn_x, "nn_y ({}) must not exceed nn_x ({})", nn_y, nn_x);
+    assert!(nn_widths.len() >= 2,
+        "nn_layers needs at least an input and an output width, got {:?}", nn_widths);
+    assert!(nn_widths.iter().all(|&w| w > 0),
+        "every layer width must be positive, got {:?}", nn_widths);
+    assert!(nn_batch > 0 && weight_chunk_size > 0,
+        "nn_batch and weight_chunk must be positive");
     let compression_factor = m
         .value_of("comp")
         .expect("Unable to parse compression factor")
@@ -122,8 +125,7 @@ async fn main() -> Result<()> {
             exit_tx =
                 mpc::Context::spawn(
                     config,
-                    nn_x,
-                    nn_y,
+                    nn_widths,
                     nn_batch,
                     weight_chunk_size,
                     compression_factor,

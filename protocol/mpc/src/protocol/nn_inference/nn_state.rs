@@ -3,10 +3,12 @@ use std::collections::{HashMap, HashSet};
 use protocol::LargeField;
 use types::Replica;
 
-/// Number of weight-combination stages in the network. The model is
-/// `[x, x, x, y]`, so there are three all-to-all weight matrices:
-/// `W1: x*x`, `W2: x*x`, `W3: x*y`.
-pub const NUM_NN_LAYERS: usize = 3;
+/// Number of weight-combination stages for a network of the given layer widths.
+/// Widths `[d0, d1, ..., dL]` describe `L` all-to-all weight matrices, stage `l`
+/// being `d_{l-1} x d_l`.
+pub fn num_stages(widths: &[usize]) -> usize {
+    widths.len() - 1
+}
 
 /// ACSS instance-id base for weight blocks. Each dealer's block is split into
 /// chunks at ids `WEIGHT_ACSS_ID_OFFSET + chunk_index`.
@@ -57,30 +59,33 @@ impl NnState {
     }
 }
 
-/// `(d_in, d_out)` for a 1-indexed stage of the `[x, x, x, y]` network.
-pub fn layer_dims(layer: usize, nn_x: usize, nn_y: usize) -> (usize, usize) {
-    match layer {
-        1 => (nn_x, nn_x),
-        2 => (nn_x, nn_x),
-        3 => (nn_x, nn_y),
-        _ => panic!("layer_dims: stage {} out of range 1..={}", layer, NUM_NN_LAYERS),
-    }
+/// `(d_in, d_out)` for a 1-indexed stage.
+pub fn layer_dims(layer: usize, widths: &[usize]) -> (usize, usize) {
+    assert!(
+        layer >= 1 && layer < widths.len(),
+        "layer_dims: stage {} out of range 1..={}",
+        layer,
+        num_stages(widths)
+    );
+    (widths[layer - 1], widths[layer])
 }
 
-/// Total weight count of the network: `2x^2 + xy`.
-pub fn total_weights(nn_x: usize, nn_y: usize) -> usize {
-    2 * nn_x * nn_x + nn_x * nn_y
+/// Total weight count of the network: `sum_l d_{l-1} * d_l`.
+pub fn total_weights(widths: &[usize]) -> usize {
+    (1..widths.len()).map(|l| widths[l - 1] * widths[l]).sum()
 }
 
 /// Offset of stage `layer`'s weight matrix in the flat global weight array
-/// `[W1 | W2 | W3]`, each stage stored row-major over `(in_index, out_index)`.
-pub fn layer_weight_offset(layer: usize, nn_x: usize) -> usize {
-    match layer {
-        1 => 0,
-        2 => nn_x * nn_x,
-        3 => 2 * nn_x * nn_x,
-        _ => panic!("layer_weight_offset: stage {} out of range", layer),
-    }
+/// `[W1 | W2 | ... | WL]`, each stage stored row-major over `(in_index, out_index)`.
+pub fn layer_weight_offset(layer: usize, widths: &[usize]) -> usize {
+    (1..layer).map(|l| widths[l - 1] * widths[l]).sum()
+}
+
+/// Inner products per forward pass: one per (example, output neuron) over every
+/// stage. Note this depends only on the *output* widths — a wider input layer
+/// costs more local GEMM but not one extra double sharing.
+pub fn total_inner_products(widths: &[usize], batch: usize) -> usize {
+    batch * widths[1..].iter().sum::<usize>()
 }
 
 /// Ceiling division, used everywhere the flat arrays are cut into equal blocks.

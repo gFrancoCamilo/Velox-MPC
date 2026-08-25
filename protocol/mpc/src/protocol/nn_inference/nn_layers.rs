@@ -2,7 +2,7 @@ use protocol::LargeField;
 
 use crate::Context;
 
-use super::nn_state::{NUM_NN_LAYERS, layer_dims};
+use super::nn_state::{layer_dims, num_stages};
 
 impl Context {
     /// Dispatch one weight-combination stage.
@@ -22,7 +22,7 @@ impl Context {
         }
         self.nn_state.layer_started.insert(layer);
 
-        let (d_in, d_out) = layer_dims(layer, self.nn_x, self.nn_y);
+        let (d_in, d_out) = layer_dims(layer, &self.nn_widths);
         // Both operands are moved out, not cloned: at benchmark scale a stage's
         // weight matrix is hundreds of MB and is never needed again once its
         // reduction is in flight.
@@ -60,7 +60,7 @@ impl Context {
     /// `mult_result` is `b * d_out` values in example-major order, matching the
     /// operand order built by `init_layer_multiplication`.
     pub async fn verify_nn_layer_termination(&mut self, layer: usize, mult_result: Vec<LargeField>) {
-        let (_, d_out) = layer_dims(layer, self.nn_x, self.nn_y);
+        let (_, d_out) = layer_dims(layer, &self.nn_widths);
         let expected = self.nn_batch * d_out;
         if mult_result.len() != expected {
             log::error!(
@@ -73,7 +73,7 @@ impl Context {
         }
         log::info!("NN stage {} complete with {} output wires", layer, mult_result.len());
 
-        if layer < NUM_NN_LAYERS {
+        if layer < num_stages(&self.nn_widths) {
             let next: Vec<Vec<LargeField>> =
                 mult_result.chunks(d_out).map(|c| c.to_vec()).collect();
             self.nn_state.activations.insert(layer + 1, next);
@@ -83,7 +83,7 @@ impl Context {
                 "Inference complete: {} output wires ({} examples x {} classes)",
                 mult_result.len(),
                 self.nn_batch,
-                self.nn_y
+                self.nn_widths[self.nn_widths.len() - 1]
             );
             self.mult_state.output_layer.output_shares = Some((
                 Self::get_share_evaluation_point(self.myid, self.use_fft, self.roots_of_unity.clone()),

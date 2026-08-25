@@ -9,8 +9,8 @@ use crate::Context;
 
 use super::nn_reference::{activation_value, deterministic_mode, weight_value};
 use super::nn_state::{
-    ACTIVATION_ACSS_ID_OFFSET, NUM_NN_LAYERS, WEIGHT_ACSS_ID_OFFSET, div_ceil, layer_dims,
-    layer_weight_offset, rss_mib, total_weights,
+    ACTIVATION_ACSS_ID_OFFSET, WEIGHT_ACSS_ID_OFFSET, div_ceil, layer_dims, layer_weight_offset,
+    num_stages, rss_mib, total_weights,
 };
 
 impl Context {
@@ -18,13 +18,13 @@ impl Context {
     /// `n * weights_per_party` so every party deals *exactly* the same count —
     /// no party carries a short final block.
     pub fn weights_per_party(&self) -> usize {
-        div_ceil(total_weights(self.nn_x, self.nn_y), self.num_nodes)
+        div_ceil(total_weights(&self.nn_widths), self.num_nodes)
     }
 
     /// Input activations per party, padded the same way. The network input is
     /// `nn_batch` vectors of length `nn_x`.
     pub fn activations_per_party(&self) -> usize {
-        div_ceil(self.nn_batch * self.nn_x, self.num_nodes)
+        div_ceil(self.nn_batch * self.nn_widths[0], self.num_nodes)
     }
 
     pub fn num_weight_chunks(&self) -> usize {
@@ -50,16 +50,13 @@ impl Context {
 
         log::info!(
             "Input phase: sharing {} weights ({} chunks of <= {}) and {} activations ({} chunks); \
-             network [{}, {}, {}, {}], batch {}",
+             network {:?}, batch {}",
             per_party,
             num_chunks,
             chunk,
             self.activations_per_party(),
             self.num_activation_chunks(),
-            self.nn_x,
-            self.nn_x,
-            self.nn_x,
-            self.nn_y,
+            self.nn_widths,
             self.nn_batch
         );
 
@@ -240,23 +237,24 @@ impl Context {
         self.nn_state.activation_chunks_seen.clear();
 
         let mut flat_weights = std::mem::take(&mut self.nn_state.weights_flat);
-        flat_weights.truncate(total_weights(self.nn_x, self.nn_y));
+        flat_weights.truncate(total_weights(&self.nn_widths));
 
         let mut flat_activations = std::mem::take(&mut self.nn_state.activations_flat);
-        flat_activations.truncate(self.nn_batch * self.nn_x);
+        flat_activations.truncate(self.nn_batch * self.nn_widths[0]);
 
         // Each stage is stored row-major over (in_index, out_index) in the flat
         // array; transpose into columns here, once, so every layer's DN call can
         // hand its weight columns straight to the inner-product path. Stages are
         // built back-to-front and split off the flat array as they are consumed,
         // so peak footprint is the model plus one stage rather than twice the model.
-        let mut weights: Vec<Vec<Vec<LargeField>>> = Vec::with_capacity(NUM_NN_LAYERS);
-        for _ in 0..NUM_NN_LAYERS {
+        let stages = num_stages(&self.nn_widths);
+        let mut weights: Vec<Vec<Vec<LargeField>>> = Vec::with_capacity(stages);
+        for _ in 0..stages {
             weights.push(Vec::new());
         }
-        for layer in (1..=NUM_NN_LAYERS).rev() {
-            let (d_in, d_out) = layer_dims(layer, self.nn_x, self.nn_y);
-            let base = layer_weight_offset(layer, self.nn_x);
+        for layer in (1..=stages).rev() {
+            let (d_in, d_out) = layer_dims(layer, &self.nn_widths);
+            let base = layer_weight_offset(layer, &self.nn_widths);
             let stage = flat_weights.split_off(base);
             flat_weights.shrink_to_fit();
             let columns: Vec<Vec<LargeField>> = (0..d_out)
@@ -269,7 +267,7 @@ impl Context {
         self.nn_state.weights = weights;
 
         let input_batch: Vec<Vec<LargeField>> = flat_activations
-            .chunks(self.nn_x)
+            .chunks(self.nn_widths[0])
             .map(|c| c.to_vec())
             .collect();
         drop(flat_activations);
@@ -277,10 +275,10 @@ impl Context {
 
         log::info!(
             "Model assembled: {} weights across {} stages, {} input vectors of length {} (RSS {} MiB)",
-            total_weights(self.nn_x, self.nn_y),
-            NUM_NN_LAYERS,
+            total_weights(&self.nn_widths),
+            stages,
             self.nn_batch,
-            self.nn_x,
+            self.nn_widths[0],
             rss_mib()
         );
     }

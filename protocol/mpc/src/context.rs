@@ -23,7 +23,7 @@ use types::{Replica, WrapperMsg, SyncMsg, SyncState};
 
 use crypto::{aes_hash::HashState, hash::Hash};
 
-use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, msg::ProtMsg, protocol::{nn_inference::nn_state::{NnState, NUM_NN_LAYERS, WEIGHT_ACSS_ID_OFFSET, ACTIVATION_ACSS_ID_OFFSET, total_weights}, rand_sharings::rand_mask::RandomOutputMaskStruct, MultState, RandSharings, VerificationState}};
+use crate::{handlers::{handler::Handler, sync_handler::SyncHandler}, msg::ProtMsg, protocol::{nn_inference::nn_state::{NnState, WEIGHT_ACSS_ID_OFFSET, ACTIVATION_ACSS_ID_OFFSET, num_stages, total_inner_products, total_weights}, rand_sharings::rand_mask::RandomOutputMaskStruct, MultState, RandSharings, VerificationState}};
 
 /// Number of coins sent to the MVBA/ACS instances to facilitate consensus.
 pub const NUM_CONSENSUS_COINS: usize = 500;
@@ -51,10 +51,10 @@ pub struct Context {
 
     pub tot_batches: usize,
 
-    /// Network shape: three stages of `nn_x` neurons feeding a final `nn_y`-neuron
-    /// layer, all-to-all, evaluated on `nn_batch` inputs at once.
-    pub nn_x: usize,
-    pub nn_y: usize,
+    /// Layer widths `[d0, d1, ..., dL]` of an all-to-all feed-forward network,
+    /// evaluated on `nn_batch` inputs at once. `d0` is the input width; each
+    /// consecutive pair is one weight-combination stage.
+    pub nn_widths: Vec<usize>,
     pub nn_batch: usize,
     /// Secrets per ACSS instance when a party's weight/activation block is split.
     pub weight_chunk_size: usize,
@@ -123,8 +123,7 @@ pub struct Context {
 impl Context {
     pub fn spawn(
         config: Node,
-        nn_x: usize,
-        nn_y: usize,
+        nn_widths: Vec<usize>,
         nn_batch: usize,
         weight_chunk_size: usize,
         compression_factor: usize,
@@ -233,11 +232,12 @@ impl Context {
         // stages: b*(2x + y) in total, each of dimension x. Each consumes one
         // degree-t sharing; the degree-2t zero sharings amortise at (t+1) per
         // group of (2t+1).
-        let inner_products = nn_batch * (2 * nn_x + nn_y);
+        let stages = num_stages(&nn_widths);
+        let inner_products = total_inner_products(&nn_widths, nn_batch);
         // Each stage pads its inner-product count up to a multiple of 2t+1, costing
         // up to 2t extra degree-t masks per stage, and the coin pool is carved out
         // of the same supply.
-        let padding_slack = NUM_NN_LAYERS * 2 * t;
+        let padding_slack = stages * 2 * t;
         let rand_sharings_needed = inner_products + padding_slack + 10 * config.num_nodes + 64;
 
         // Randomness extraction yields (t+1) sharings per (2t+1) dealer
@@ -245,17 +245,18 @@ impl Context {
         let tot_sharings = ((rand_sharings_needed + (3 * num_batches * (t + 1)) - 1)
             / (3 * num_batches * (t + 1))).max(1);
 
-        let output_mask_size = nn_batch * nn_y;
+        let output_mask_size = nn_batch * nn_widths[nn_widths.len() - 1];
 
         log::warn!(
             "Tuple verification is DISABLED: this run is semi-honest-only and a \
              malicious party can corrupt the inference result undetected."
         );
         log::info!(
-            "NN inference: [{x}, {x}, {x}, {y}] batch {b} -> {w} weights, {ip} inner products \
-             of dimension {x}; preprocessing {rs} degree-t sharings ({ts} secrets/dealer/batch)",
-            x = nn_x, y = nn_y, b = nn_batch,
-            w = total_weights(nn_x, nn_y),
+            "NN inference: {widths:?} batch {b} -> {w} weights, {ip} inner products; \
+             preprocessing {rs} degree-t sharings ({ts} secrets/dealer/batch)",
+            widths = nn_widths,
+            b = nn_batch,
+            w = total_weights(&nn_widths),
             ip = inner_products,
             rs = rand_sharings_needed,
             ts = tot_sharings,
@@ -281,8 +282,7 @@ impl Context {
 
                 tot_batches: num_batches,
 
-                nn_x: nn_x,
-                nn_y: nn_y,
+                nn_widths: nn_widths,
                 nn_batch: nn_batch,
                 weight_chunk_size: weight_chunk_size,
 
@@ -321,7 +321,7 @@ impl Context {
                 roots_of_unity: gen_roots_of_unity(config.num_nodes),
 
                 total_sharings: tot_sharings,
-                max_depth: NUM_NN_LAYERS,
+                max_depth: stages,
                 output_mask_size: output_mask_size,
 
                 verification_enabled: false,

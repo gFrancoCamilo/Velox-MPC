@@ -5,11 +5,11 @@
 //! function of its index in the flat global array instead of a random field
 //! element. Every party can then recompute the expected output in the clear and
 //! compare it against the value the protocol reconstructed. Enable it only for
-//! small parameters — the reference pass is a plaintext GEMM of the whole model.
+//! small networks — the reference pass is a plaintext GEMM of the whole model.
 
 use protocol::LargeField;
 
-use super::nn_state::{layer_dims, layer_weight_offset, NUM_NN_LAYERS};
+use super::nn_state::{layer_dims, layer_weight_offset, num_stages};
 
 /// Offset separating the activation index space from the weight index space, so
 /// a weight and an activation never share a value by construction.
@@ -34,17 +34,17 @@ pub fn activation_value(flat_index: usize) -> LargeField {
 }
 
 /// Plaintext forward pass over the deterministic model, in example-major order:
-/// `out[i * nn_y + j]`.
-pub fn reference_output(nn_x: usize, nn_y: usize, nn_batch: usize) -> Vec<LargeField> {
-    // Stage input: the network's activations, one row per example.
-    let mut acts: Vec<Vec<LargeField>> = (0..nn_batch)
-        .map(|i| (0..nn_x).map(|k| activation_value(i * nn_x + k)).collect())
+/// `out[i * d_L + j]`.
+pub fn reference_output(widths: &[usize], batch: usize) -> Vec<LargeField> {
+    let d_input = widths[0];
+    let mut acts: Vec<Vec<LargeField>> = (0..batch)
+        .map(|i| (0..d_input).map(|k| activation_value(i * d_input + k)).collect())
         .collect();
 
-    for layer in 1..=NUM_NN_LAYERS {
-        let (d_in, d_out) = layer_dims(layer, nn_x, nn_y);
-        let base = layer_weight_offset(layer, nn_x);
-        let next: Vec<Vec<LargeField>> = acts
+    for layer in 1..=num_stages(widths) {
+        let (d_in, d_out) = layer_dims(layer, widths);
+        let base = layer_weight_offset(layer, widths);
+        acts = acts
             .iter()
             .map(|row| {
                 (0..d_out)
@@ -58,7 +58,6 @@ pub fn reference_output(nn_x: usize, nn_y: usize, nn_batch: usize) -> Vec<LargeF
                     .collect()
             })
             .collect();
-        acts = next;
     }
 
     acts.into_iter().flatten().collect()

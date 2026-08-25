@@ -33,13 +33,9 @@ args:
         long: messages
         help: (legacy, unused by the NN-inference protocol)
         takes_value: true
-    - nn_x:
-        long: nn_x
-        help: Neurons in each of the first three layers of the network
-        takes_value: true
-    - nn_y:
-        long: nn_y
-        help: Neurons in the final layer of the network (nn_y <= nn_x)
+    - nn_layers:
+        long: nn_layers
+        help: "Comma-separated layer widths, e.g. 25088,4096,4096,1000 (VGG-16 classifier)"
         takes_value: true
     - nn_batch:
         long: nn_batch
