@@ -34,6 +34,13 @@ async fn main() -> Result<()> {
                 .expect("nn_layers must be a comma-separated list of positive integers")
         })
         .collect();
+    // Benchmark-only: replaces the input ACSS with locally derived shares so the
+    // online and output phases can be timed without paying for the input phase.
+    // The resulting shares are consistent but NOT secret.
+    let skip_input_phase = matches!(
+        m.value_of("skip_input_phase").unwrap_or("false"),
+        "true" | "1" | "yes"
+    );
     let nn_batch = m
         .value_of("nn_batch")
         .unwrap_or("1")
@@ -127,6 +134,7 @@ async fn main() -> Result<()> {
                     config,
                     nn_widths,
                     nn_batch,
+                    skip_input_phase,
                     weight_chunk_size,
                     compression_factor,
                     node_normal

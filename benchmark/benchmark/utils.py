@@ -71,17 +71,18 @@ class PathMaker:
         #return join(PathMaker.logs_path(), f'client-{i}-{j}.log')
 
     @staticmethod
-    def client_local_log_file(i, n, arch_tag, nn_batch, compr_factor):
+    def client_local_log_file(i, n, arch_tag, nn_batch, compr_factor, suffix=''):
         assert isinstance(i, int) and i >= 0
-        return join('logs', f'party-{i}_n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}.log')
+        return join('logs', f'party-{i}_n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}{suffix}.log')
     
     @staticmethod
     def syncer_log_file():
         return join(PathMaker.logs_path(), f'syncer.log')
     
     @staticmethod
-    def syncer_local_log_file(n, arch_tag, nn_batch, compr_factor):
-        return join('logs', f'syncer-n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}.log')
+    def syncer_local_log_file(n, arch_tag, nn_batch, compr_factor, suffix=''):
+        # compile_results.py parses the configuration back out of this name.
+        return join('logs', f'syncer-n_{n}_{arch_tag}_b{nn_batch}_c{compr_factor}{suffix}.log')
     @staticmethod
     def results_path():
         return 'results'

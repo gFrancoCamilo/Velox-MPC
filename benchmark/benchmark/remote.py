@@ -67,8 +67,8 @@ class Bench:
             # Install rust (non-interactive).
             'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y',
             'source $HOME/.cargo/env',
-            'rustup install 1.83.0',
-            'rustup override set 1.83.0',
+            'rustup install 1.88.0',
+            'rustup override set 1.88.0',
 
             # This is missing from the Rocksdb installer (needed for Rocksdb).
             'sudo apt-get install -y clang',
@@ -260,7 +260,8 @@ class Bench:
                     bench_parameters.nn_layers,
                     batch,
                     bench_parameters.weight_chunk,
-                    bench_parameters.compression_factor
+                    bench_parameters.compression_factor,
+                    bench_parameters.skip_input_phase
                 )
                 print('Running the following command on the remote machine:', cmd)
                 log_file = PathMaker.syncer_log_file()
@@ -270,7 +271,8 @@ class Bench:
                 bench_parameters.nn_layers,
                 batch,
                 bench_parameters.weight_chunk,
-                bench_parameters.compression_factor
+                bench_parameters.compression_factor,
+                bench_parameters.skip_input_phase
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)
@@ -289,7 +291,8 @@ class Bench:
                     bench_parameters.nn_layers,
                     batch,
                     bench_parameters.weight_chunk,
-                    bench_parameters.compression_factor
+                    bench_parameters.compression_factor,
+                    bench_parameters.skip_input_phase
                 )
                 print(cmd)
                 log_file = PathMaker.syncer_log_file()
@@ -299,7 +302,8 @@ class Bench:
                 bench_parameters.nn_layers,
                 batch,
                 bench_parameters.weight_chunk,
-                bench_parameters.compression_factor
+                bench_parameters.compression_factor,
+                bench_parameters.skip_input_phase
             )
             log_file = PathMaker.primary_log_file(i)
             self._background_run(ip, cmd, log_file)
@@ -321,7 +325,8 @@ class Bench:
                         bench_parameters.nodes[0],
                         bench_parameters.arch_tag(),
                         batch,
-                        bench_parameters.compression_factor
+                        bench_parameters.compression_factor,
+                        bench_parameters.mode_suffix()
                     )
                 )
                 c.get(
@@ -331,7 +336,8 @@ class Bench:
                         bench_parameters.nodes[0],
                         bench_parameters.arch_tag(),
                         batch,
-                        bench_parameters.compression_factor
+                        bench_parameters.compression_factor,
+                        bench_parameters.mode_suffix()
                     )
                 )
 

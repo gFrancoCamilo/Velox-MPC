@@ -14,7 +14,7 @@ from benchmark.utils import PathMaker
 #
 # For a like-for-like comparison against Talos (which needs n = 4t+1), match on
 # t rather than n: Velox n=13 vs Talos n=17, n=25 vs n=33, n=49 vs n=65.
-n = 64
+n = 49
 
 # ---------------------------------------------------------------------------
 # Network under test: the full width list [d0, d1, ..., dL] of an all-to-all
@@ -28,10 +28,15 @@ n = 64
 #   VGG-16 head (CIFAR)  [512, 4096, 4096, 10]            18.9M weights
 #   AlexNet head         [9216, 4096, 4096, 1000]         58.6M weights
 #   VGG-16 head          [25088, 4096, 4096, 1000]        123.6M weights
-nn_layers = [3072, 2048, 1024, 512, 10]
+nn_layers = [512, 4096, 4096, 10]
 
 # A list sweeps these batch sizes sequentially (see the `sweep` task).
-nn_batch = [16, 32, 128]
+nn_batch = [8]
+
+# BENCHMARK ONLY. Replaces the input ACSS with locally derived shares so the
+# online and output phases can be timed without paying for the input phase.
+# The shares are consistent but NOT secret.
+skip_input_phase = False
 
 # Secrets per ACSS instance when a party's weight block is split.
 weight_chunk = 250_000
@@ -46,6 +51,7 @@ def _bench_params(batch=None):
         'nn_layers': nn_layers,
         'nn_batch': [batch] if batch is not None else nn_batch,
         'weight_chunk': weight_chunk,
+        'skip_input_phase': skip_input_phase,
         'compression_factor': compression_factor,
     }
 

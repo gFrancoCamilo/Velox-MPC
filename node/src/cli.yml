@@ -37,6 +37,10 @@ args:
         long: nn_layers
         help: "Comma-separated layer widths, e.g. 25088,4096,4096,1000 (VGG-16 classifier)"
         takes_value: true
+    - skip_input_phase:
+        long: skip_input_phase
+        help: "BENCHMARK ONLY: derive input shares locally instead of secret-sharing them (true/false)"
+        takes_value: true
     - nn_batch:
         long: nn_batch
         help: Number of inference inputs evaluated in one forward pass

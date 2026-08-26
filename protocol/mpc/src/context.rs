@@ -56,6 +56,10 @@ pub struct Context {
     /// consecutive pair is one weight-combination stage.
     pub nn_widths: Vec<usize>,
     pub nn_batch: usize,
+    /// BENCHMARK ONLY: derive input shares locally instead of running the input
+    /// ACSS. See `protocol::nn_inference::local_inputs` -- the shares are
+    /// consistent but not secret.
+    pub skip_input_phase: bool,
     /// Secrets per ACSS instance when a party's weight/activation block is split.
     pub weight_chunk_size: usize,
 
@@ -125,6 +129,7 @@ impl Context {
         config: Node,
         nn_widths: Vec<usize>,
         nn_batch: usize,
+        skip_input_phase: bool,
         weight_chunk_size: usize,
         compression_factor: usize,
         _byz: bool
@@ -284,6 +289,7 @@ impl Context {
 
                 nn_widths: nn_widths,
                 nn_batch: nn_batch,
+                skip_input_phase: skip_input_phase,
                 weight_chunk_size: weight_chunk_size,
 
                 total_sharings_for_coins: 10*config.num_nodes,

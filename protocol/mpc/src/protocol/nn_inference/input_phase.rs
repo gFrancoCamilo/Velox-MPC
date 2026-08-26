@@ -44,6 +44,10 @@ impl Context {
     /// liveness — a single crashed party stalls the run — which is the intended
     /// trade for a benchmark that must evaluate the real model.
     pub async fn init_input_phase(&mut self) {
+        if self.skip_input_phase {
+            self.init_input_phase_local().await;
+            return;
+        }
         let per_party = self.weights_per_party();
         let chunk = self.weight_chunk_size;
         let num_chunks = self.num_weight_chunks();
@@ -124,6 +128,40 @@ impl Context {
                 );
             }
         }
+    }
+
+    /// Benchmark path: derive this party's share of every weight and activation
+    /// locally, then go straight to assembly. No dealing, no dispersal, and no
+    /// all-dealers barrier -- there is nothing to wait for.
+    ///
+    /// The flat arrays are filled exactly as the ACSS path fills them, so
+    /// `assemble_model` and everything downstream are unchanged.
+    pub async fn init_input_phase_local(&mut self) {
+        use super::local_inputs::LocalShareDeriver;
+
+        log::warn!(
+            "Input phase SKIPPED: shares are derived locally from a public deterministic \
+             encoding and are NOT secret. Benchmark only."
+        );
+        let deriver = LocalShareDeriver::new(self.myid, self.num_faults);
+
+        // Same padded extents the ACSS path allocates, so assemble_model's
+        // truncation to the real weight/activation counts still applies.
+        let w_total = self.weights_per_party() * self.num_nodes;
+        let a_total = self.activations_per_party() * self.num_nodes;
+
+        self.nn_state.weights_flat = deriver.shares_range(0, w_total, weight_value);
+        self.nn_state.activations_flat = deriver.shares_range(0, a_total, activation_value);
+
+        log::info!(
+            "Input phase (local): derived {} weight and {} activation shares (RSS {} MiB)",
+            w_total, a_total, rss_mib()
+        );
+
+        self.nn_state.input_phase_done = true;
+        self.assemble_model();
+        self.terminate("Input".to_string(), vec![]).await;
+        self.init_nn_layer(1).await;
     }
 
     pub async fn handle_weight_acss_termination(

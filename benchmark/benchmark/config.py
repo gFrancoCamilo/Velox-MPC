@@ -214,6 +214,9 @@ class BenchParameters:
             # Secrets per ACSS instance when a party's weight block is split.
             self.weight_chunk = int(json.get('weight_chunk', 250_000))
 
+            # BENCHMARK ONLY: locally derived input shares, not secret.
+            self.skip_input_phase = bool(json.get('skip_input_phase', False))
+
             self.compression_factor = int(json['compression_factor'])
 
             self.runs = int(json['runs']) if 'runs' in json else 1
@@ -239,6 +242,10 @@ class BenchParameters:
         local GEMM but not one extra sharing.
         """
         return batch * sum(self.nn_layers[1:])
+
+    def mode_suffix(self):
+        '''Keeps skip-input logs from overwriting or being averaged with full runs.'''
+        return '_noinput' if self.skip_input_phase else ''
 
     def arch_tag(self):
         return '-'.join(str(w) for w in self.nn_layers)

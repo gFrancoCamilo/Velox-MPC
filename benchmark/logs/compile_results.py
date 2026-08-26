@@ -19,7 +19,7 @@ from collections import OrderedDict
 from statistics import mean
 
 LINE = re.compile(r'with latency \[([^\]]+)\], status \{"([^"]+)"\}')
-NAME = re.compile(r'syncer-n_(\d+)_([\d-]+)_b(\d+)_c(\d+)\.log$')
+NAME = re.compile(r'syncer-n_(\d+)_([\d-]+)_b(\d+)_c(\d+)(_noinput)?\.log$')
 
 PHASE_ORDER = ['Preprocessing', 'Input', 'Online', 'verification', 'output']
 
@@ -51,6 +51,8 @@ def parse(path):
             'weights': sum(widths[i] * widths[i + 1]
                            for i in range(len(widths) - 1)),
             'inner_products': int(m.group(3)) * sum(widths[1:]),
+            # Not comparable with full runs -- one omits the input phase.
+            'skip_input': bool(m.group(5)),
         }
     return phases, cfg
 
@@ -64,7 +66,8 @@ def report(path):
     print(f'\n=== {path} ===')
     if cfg:
         print(f'  network {"-".join(map(str, cfg["widths"]))}  '
-              f'n={cfg["nodes"]}  batch={cfg["batch"]}')
+              f'n={cfg["nodes"]}  batch={cfg["batch"]}'
+              + ('   [INPUT PHASE SKIPPED]' if cfg['skip_input'] else ''))
         print(f'  {cfg["weights"]:,} weights, {cfg["inner_products"]:,} '
               f'inner products (= degree-t double sharings)')
 
@@ -103,13 +106,14 @@ def main():
 
     groups = OrderedDict()
     for cfg, total in rows:
-        key = ('-'.join(map(str, cfg['widths'])), cfg['nodes'])
+        key = ('-'.join(map(str, cfg['widths'])), cfg['nodes'], cfg['skip_input'])
         groups.setdefault(key, []).append((cfg['batch'], total,
                                            cfg['inner_products']))
-    for (arch, nodes), entries in groups.items():
+    for (arch, nodes, skipped), entries in groups.items():
         if len(entries) < 2:
             continue
-        print(f'\n=== batch scaling: {arch}, n={nodes} ===')
+        mode = ' [input skipped]' if skipped else ''
+        print(f'\n=== batch scaling: {arch}, n={nodes}{mode} ===')
         print(f'  {"batch":>7} {"inner products":>16} {"total":>10} '
               f'{"per inference":>14}')
         for batch, total, ips in sorted(entries):

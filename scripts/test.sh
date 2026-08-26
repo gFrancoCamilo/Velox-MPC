@@ -9,6 +9,9 @@
 
 rm -rf /tmp/*.db &> /dev/null
 export NN_DETERMINISTIC=${NN_DETERMINISTIC:-0}
+# SKIP_INPUT=1 derives input shares locally (benchmark only: not secret)
+SKIP=${SKIP_INPUT:-false}
+[ "$SKIP" = "1" ] && SKIP=true
 
 N=$1
 LAYERS=${2:-512,512,512,128}
@@ -68,6 +71,7 @@ setsid ./target/$TYPE/node \
     --nn_layers $LAYERS \
     --nn_batch $NN_BATCH \
     --weight_chunk $WEIGHT_CHUNK \
+    --skip_input_phase $SKIP \
     --comp $COMP \
     --byzantine false > logs/syncer_$TAG.log 2>&1 &
 
@@ -80,6 +84,7 @@ setsid ./target/$TYPE/node \
     --nn_layers $LAYERS \
     --nn_batch $NN_BATCH \
     --weight_chunk $WEIGHT_CHUNK \
+    --skip_input_phase $SKIP \
     --comp $COMP \
     --byzantine false > logs/party-$i-$TAG.log 2>&1 &
 done

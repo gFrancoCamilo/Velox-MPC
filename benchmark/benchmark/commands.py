@@ -41,7 +41,7 @@ class CommandMaker:
         )
 
     @staticmethod
-    def _nn_args(nn_layers, nn_batch, weight_chunk, compression_factor):
+    def _nn_args(nn_layers, nn_batch, weight_chunk, compression_factor, skip_input=False):
         """Flags describing the network under test.
 
         `nn_layers` is the full width list `[d0, d1, ..., dL]` of an all-to-all
@@ -60,21 +60,22 @@ class CommandMaker:
         assert isinstance(weight_chunk, int) and weight_chunk > 0
         layers = ','.join(str(w) for w in nn_layers)
         return (f'--nn_layers {layers} --nn_batch {nn_batch} '
-                f'--weight_chunk {weight_chunk} --comp {compression_factor}')
+                f'--weight_chunk {weight_chunk} --comp {compression_factor}'
+                + f' --skip_input_phase {"true" if skip_input else "false"}')
 
     @staticmethod
-    def run_primary(key, nn_layers, nn_batch, weight_chunk, compression_factor, debug=False):
+    def run_primary(key, nn_layers, nn_batch, weight_chunk, compression_factor, skip_input=False, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor)
+        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor, skip_input)
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
                 f'--protocol mpc --syncer syncer {args} --byzantine false')
 
     @staticmethod
-    def run_syncer(key, nn_layers, nn_batch, weight_chunk, compression_factor, debug=False):
+    def run_syncer(key, nn_layers, nn_batch, weight_chunk, compression_factor, skip_input=False, debug=False):
         assert isinstance(key, str)
         assert isinstance(debug, bool)
-        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor)
+        args = CommandMaker._nn_args(nn_layers, nn_batch, weight_chunk, compression_factor, skip_input)
         return (f'ulimit -n 5000; ./node --config {key} --ip ip_file '
                 f'--protocol sync --syncer syncer {args} --byzantine false')
 

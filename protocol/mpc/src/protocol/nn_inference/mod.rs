@@ -1,3 +1,4 @@
+pub mod local_inputs;
 mod input_phase;
 
 mod nn_layers;
